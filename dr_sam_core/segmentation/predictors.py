@@ -113,7 +113,7 @@ def segmentize(image: np.ndarray, input_boxes: torch.Tensor, predictor, i: int =
             mask1 = np.transpose(predicted[j].cpu().numpy(), (1, 2, 0))
             im_pil = Image.fromarray(np.squeeze(mask1))
             im_pil = im_pil.filter(ImageFilter.ModeFilter(size=7))
-            fixed_mask = np.asarray(im_pil)
+            fixed_mask = np.asarray(im_pil.filter(ImageFilter.ModeFilter(size=7)))
 
             _img = image.copy()
             _img[fixed_mask.astype(np.bool8)] = [255, 255, 255]
