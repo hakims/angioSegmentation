@@ -1,0 +1,75 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# Virtual environment
+.venv/
+env/
+venv/
+pip-wheel-metadata/
+*.egg
+
+# Editor settings
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+
+# Python dependency files
+poetry.lock
+Pipfile.lock
+
+# Output folders
+frames/
+masks/
+skeletons/
+skeletons_raw/
+metadata/
+debug/
+auto_boxes.json
+
+# Debug overlays (recursive)
+debug/
+debug/**/*
+
+# Model checkpoints and outputs
+*.pth
+*.pt
+*.ckpt
+
+# Media & large files
+*.mp4
+*.avi
+*.mov
+*.png
+*.jpg
+*.tif
+*.npy
+
+# CVAT annotation exports
+annotations/
+cvat_export/
+
+# Dr-SAM model file
+dr_sam_core/checkpoints/sam_vit_h.pth

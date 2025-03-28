@@ -1,0 +1,144 @@
+
+🧠 Project Summary: AI-Powered Angiogram Segmentation Using Dr-SAM
+🎯 Goal
+To build a fully automated segmentation and anomaly detection pipeline for lower extremity angiograms, using and extending the methodology of the Dr-SAM framework. The end goal is to:
+
+Generate vessel masks, skeletons, and anomaly points (e.g., stenoses, aneurysms)
+
+Pre-label angiogram frames to assist with annotation (e.g., in CVAT)
+
+Enable quality benchmarking and clinical insight generation using vascular imaging data.
+
+When you're asked to ensure something is consistent with the "original Dr-SAM" methodology, make sure to reconcile how they describe their implementation in the original research paper (Found in the lit review folder), as well as the original Dr.SAM codebase (found in the dr_sam folder). If you are unable to open the original DrSAM paper please tell me to upload it to you. 
+
+Our goal based on my understanding of the paper: 
+Figure 2: 
+shows that out of the box SAM with no help produces an inaccurate vessel mask (far right image)
+
+This is the foundation for WHY their project is important
+So then they say "ok what if we give the model some help by providing bounding boxes
+Figure 4:
+
+Far left: vanilla SAM but they gave 3 bounding boxes based on how their expert reviewers pre-labeled images
+middle: bounding boxes plus ONE positive point chosen as the blackest pixel in that box, because in theory, that blackest pixel should be in a contrast enhanced vessel. In reality still inefficient
+Far right: Dr-SAM algorithm: 
+Pick the blackest pixel and generate a probability map of likely vessels that have a vessel
+pick a second point in a predefined radius away from point 1, but that second point should have a lot of neighboring vessels that are also black because that in theory is either a continuation or separate vessel. Segment the image using these points.
+Keep picking points and segmenting 5x. 
+They quantify their results using IoU
+
+
+Whats the problem that I'm trying to address?
+WHAT IF YOU DONT HAVE TIME TO PRE LABEL BOUNDING BOXES?
+also what about lower extremity angiograms?
+My solution: 
+Use a Gaussian/Frangi transformation to make the image "look like a vessel" and autogenerate a bounding box based on that transform. Then feed that box to the Dr-SAM algorithm and segment. 
+Methods:
+We need two data sets:
+One that has been labeled with bounding boxes by expert reviewers, similar to their original study. 
+raw unlabeled angiogram images
+apply OUR gaussian (or other) image transform and automated bounding box generation
+Feed each dataset into the Dr-SAM algorithm
+we can create a similar Figure 4 like they did
+and quantify the IoU of 1) segmentations ran with expert labeled images and 2) segmentations ran with the transform generated boxes
+Additionally we can take the original Dr-SAM benchmark dataset, apply our transform/automated box generated segmentations and compare
+
+📁 Updated Project Structure
+
+AngioMLM/
+├── bin/
+│   ├── buildDrSAM.py               # Main runner script: crops, extracts, boxes, segments
+│   ├── cleanupDrSAM.py            # Optional cleanup utility (for folders, debug, etc.)
+│   └── buildDependencies.py       # Handles torch and other setup dependencies
+│
+├── segmentation/
+│   ├── segment_vessels.py         # Core segmentation wrapper using Dr-SAM
+│   └── segmentationPipeline.py    # Saves masks, skeletons, debug images, and metadata
+│
+├── preprocessing/
+│   ├── bounding_boxes.py          # Smart bounding box generation using filters + contours
+│   └── transforms.py              # Defines transform options: frangi, clahe, hessian, etc.
+│
+├── dr_sam_core/                   # Refactored core from the original Dr-SAM repo
+│   ├── segmentation/
+│   │   ├── predictors.py          # SAM model loader and segmentize() logic
+│   │   └── ...                    # Other supporting segmentation logic
+│   ├── anomality_detection/
+│   │   ├── skeletonize.py         # Skeleton extraction logic
+│   │   ├── detection_algorithms.py# Stenosis / aneurysm detection methods
+│   │   └── utils.py               # Utility functions for mask/skeleton analysis
+│   └── checkpoints/
+│       └── sam_vit_h.pth          # Model weights for Segment Anything (auto-downloaded)
+│
+├── utils/
+│   └── io.py                      # Frame extraction, video cropping, folder scans, etc.
+
+This is the file structure we generate in each directory that contains the mp4 angiograms the user passes
+├── frames/                        # Extracted image frames (auto-generated)
+├── masks/                         # Output vessel masks (black vessel on white bg)
+├── skeletons_raw/                # Unpruned skeletons for each mask
+├── skeletons/                    # Pruned skeletons after filtering
+├── metadata/                     # Anomaly JSON outputs
+├── debug/
+│   ├── bounding_boxes/           # Bounding box overlays from preprocessing
+│   └── segment_vessels/          # Original image overlays with prompt points (optional)
+
+
+🔁 Refactor History
+The original Dr-SAM GitHub repo was adapted as follows:
+
+Isolated Core Functionality:
+
+Extracted only the needed components into dr_sam_core/ to avoid entangling upstream logic.
+
+Fixed broken or relative imports for standalone use.
+
+Custom Wrapper Integration:
+
+Built our own segment_vessels() around segmentize() to support batch processing, skeletonization, and anomaly detection.
+
+Retained the 5-point mask refinement logic from the paper (Section 3.1 and 4.1).
+
+New Features:
+
+Support for auto-generated bounding boxes using vessel-enhancing filters (e.g., Frangi filter).
+
+Smart fallback handling for segmentation failures and debug overlays.
+
+Output format made compatible with downstream CVAT and metadata storage.
+
+🧩 Core Files and Roles
+File	Description
+buildDrSAM.py	Main runner. Extracts frames, crops, applies transforms, generates boxes, and saves results.
+segment_vessels.py	Calls Dr-SAM logic, applies masks, detects anomalies and skeletons.
+segmentationPipeline.py	Applies segmentation per-frame, saves outputs, and manages folders.
+bounding_boxes.py	Applies image filters + contour extraction to generate bounding boxes.
+transforms.py	Defines preprocessing filters (e.g., Frangi, CLAHE).
+🔍 Known Issues / Ongoing Bugs
+.get() used on a tensor caused segmentation to fail — partly fixed, still needs refinement for mixed input handling (dict vs Tensor).
+
+Autobox generation often selects irrelevant areas (e.g., bones or femoral heads) instead of actual vessels. Work is ongoing to improve bounding box logic using heuristics or longer vessel coverage strategies.
+
+Some segmentation failures stem from shape mismatch or downstream mask errors when segmentize() returns malformed tensors.
+
+✅ Completed Milestones
+✅ Frame extraction from MP4 using ffmpeg/VLC
+
+✅ Automatic bounding box generation + debug overlays
+
+✅ Batch-safe segmentation with Dr-SAM
+
+✅ Skeletonization and anomaly detection
+
+✅ CVAT-compatible outputs
+
+✅ Full refactor for modularity and portability
+
+📌 Key Concepts
+Dr-SAM Pipeline: Uses SAM (Segment Anything Model) with additional refinement logic to extract high-quality vessel masks, then runs skeleton and anomaly detection.
+
+Segmentation Targets: Currently tuned for common iliac, external iliac, femoral, and popliteal arteries.
+
+Frangi Filter: Used to enhance tubular structures before thresholding to generate bounding boxes.
+
+Debug Strategy: Intermediate overlays are saved to separate debug/bounding_boxes folders for visual inspection.

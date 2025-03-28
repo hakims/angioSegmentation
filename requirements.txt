@@ -1,0 +1,9 @@
+opencv-python
+numpy
+Pillow
+scikit-image
+requests
+matplotlib
+plantcv
+imageio[ffmpeg]
+git+https://github.com/facebookresearch/segment-anything.git

@@ -1,0 +1,9 @@
+opencv-python
+numpy
+torch
+torchvision
+requests
+scikit-image
+git+https://github.com/facebookresearch/segment-anything.git
+git+https://github.com/vazgenzohranyan/Dr.SAM.git
+imageio[ffmpeg]
