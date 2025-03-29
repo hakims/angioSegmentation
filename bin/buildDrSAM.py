@@ -1,5 +1,5 @@
 # File: buildDrSAM.py
-# Version: 0.15 (restores environment bootstrapping, torch, and masks_dir setup)
+# Version: 0.27 (removes testing logic in favor of separate testing framework)
 """
 Dr-SAM Angiogram Segmentation Pipeline
 ---------------------------------------
@@ -7,6 +7,9 @@ Adds support for image preprocessing filters prior to segmentation.
 
 Run this script after installing dependencies with:
     python buildDrSAM.py <root_folder>
+
+For testing, use the dedicated testing framework:
+    python tests/testingMaster.py
 """
 
 import sys
@@ -21,136 +24,202 @@ import json
 import cv2
 import torch
 import imageio_ffmpeg
+import glob
 
 from utils.io import (
-    detect_crop_bounds_from_video,
-    crop_video_with_ffmpeg,
     find_media_files,
-    extract_frames_from_video,
+    get_frames_from_path,
 )
 from segmentation.segmentationPipeline import segment_and_save_outputs
-from preprocessing.bounding_boxes import (
-    generate_boxes_from_image,
-    overlay_debug_outputs,
-)
+from preprocessing.bounding_boxes import process_images, load_bounding_boxes
 from preprocessing.transforms import apply_transform
 
 FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
 
 # === Dynamic dependency and setup bootstrap ===
 def _run_build_dependencies_if_needed():
-    print("🔍 Checking environment dependencies...")
+    print("[INFO] Checking environment dependencies...")
     try:
         import torch
-        print("✅ PyTorch is installed.")
-        print("🎉 All dependencies already installed.")
+        print("[OK] PyTorch is installed.")
+        print("[OK] All dependencies already installed.")
     except ImportError:
-        print("⚙️ Running buildDependencies.py to set up environment...")
+        print("[INFO] Running buildDependencies.py to set up environment...")
         subprocess.check_call([sys.executable, "buildDependencies.py"])
-        print("✅ Finished environment setup via buildDependencies.py")
+        print("[OK] Finished environment setup via buildDependencies.py")
 
 _run_build_dependencies_if_needed()
 
-def main(mp4_root, use_fps, transform="none", quiet=True, auto_box=True, box_transform="frangi", min_box_size=2000, save_boxes=True):
-    print(f"📂 Scanning: {mp4_root}")
-    media_by_folder = find_media_files(mp4_root)
+def main(input_path, use_fps=False, method="median", quiet=True, auto_boundingBox=True, 
+         boundingBox_method="frangi", min_boundingBox_size=2000, user_provided_boundingBoxes=None, 
+         boundingBox_file=None, output_dir=None, force_extract=False):
+    """
+    Main DrSAM pipeline function.
+    
+    Args:
+        input_path: Path to folder containing MP4 files or images
+        use_fps: Whether to use 2 fps for frame extraction
+        method: Image transformation method to use
+        quiet: Suppress verbose output
+        auto_boundingBox: Whether to auto-generate bounding boxes when no metadata is available
+        boundingBox_method: Method for automatic bounding box generation
+        min_boundingBox_size: Minimum size for keeping auto-generated bounding boxes
+        user_provided_boundingBoxes: Optional dictionary mapping filenames to pre-defined bounding boxes 
+        boundingBox_file: Path to JSON file containing bounding box information
+        output_dir: Custom output directory
+        force_extract: Whether to force re-extraction of frames from videos
+    """
+    print(f"📂 Processing: {input_path}")
+    input_path = Path(input_path)
     total_start = time.time()
-
-    for folder, files in media_by_folder.items():
-        print(f"\n📁 Processing folder: {folder}")
-        folder_boxes = {}
-
-        debug_boxes_dir = folder / "debug" / "bounding_boxes"
-        debug_boxes_dir.mkdir(parents=True, exist_ok=True)
-
-        masks_dir = folder / "masks"
-        masks_dir.mkdir(parents=True, exist_ok=True)
-
-        for idx, file in enumerate(files, 1):
-            ext = file.suffix.lower()
-            if ext not in ['.mp4', '.avi', '.mov']:
-                print(f"🧾 Skipping non-video file: {file.name}")
-                continue
-
-            print(f"  ▶ [{idx}/{len(files)}] {file.name}")
-            start_time = time.time()
-
-            crop_bounds = detect_crop_bounds_from_video(file)
-            if crop_bounds:
-                cropped_path = file.with_name(file.stem + "_cropped.mp4")
-                if crop_video_with_ffmpeg(file, cropped_path, crop_bounds):
-                    file = cropped_path
-
-            frame_paths = extract_frames_from_video(
-                file,
-                output_dir=folder / "frames",
-                use_fps=use_fps,
-                quiet=quiet
-            )
-
-            for frame in frame_paths:
-                image = cv2.imread(str(frame))
-                if image is None:
-                    print(f"⚠️ Skipping unreadable frame: {frame.name}")
-                    continue
-
-                boxes = generate_boxes_from_image(image, transform=box_transform, min_size=min_box_size)
-                folder_boxes[frame.name] = boxes.tolist()
-
-                debug_prefix = debug_boxes_dir / frame.stem
-                vessel_map = image if transform == "none" else apply_transform(image, method=box_transform)
-                overlay_debug_outputs(image, vessel_map, boxes, str(debug_prefix))
-
-            # Segment and save for all frames in this folder
-            segment_and_save_outputs(
-                frames=frame_paths,
-                output_root=folder,
-                transform=transform,
-                frame_to_boxes=folder_boxes
-            )
-
-            elapsed = time.time() - start_time
-            minutes, seconds = divmod(elapsed, 60)
-            hours, minutes = divmod(minutes, 60)
-            if hours >= 1:
-                print(f"    ⏱️ Done in {int(hours)}h {int(minutes)}m {seconds:.2f}s")
-            elif minutes >= 1:
-                print(f"    ⏱️ Done in {int(minutes)}m {seconds:.2f}s")
-            else:
-                print(f"    ⏱️ Done in {seconds:.2f}s")
-
-        if auto_box and save_boxes:
-            out_path = folder / "auto_boxes.json"
-            with open(out_path, "w") as f:
-                json.dump(folder_boxes, f, indent=2)
-            print(f"📦 Saved auto-generated boxes to {out_path}")
-
-    total_elapsed = time.time() - total_start
-    minutes, seconds = divmod(total_elapsed, 60)
-    hours, minutes = divmod(minutes, 60)
-    if hours >= 1:
-        print(f"\n✅ Finished entire run in {int(hours)}h {int(minutes)}m {seconds:.2f}s")
-    elif minutes >= 1:
-        print(f"\n✅ Finished entire run in {int(minutes)}m {seconds:.2f}s")
+    
+    # Initialize boundingBoxes dictionary from user_provided_boundingBoxes if provided
+    boundingBoxes_dict = user_provided_boundingBoxes.copy() if user_provided_boundingBoxes else {}
+    
+    # If no pre-loaded boundingBoxes, try to load from file or search in input folder
+    if not boundingBoxes_dict:
+        boundingBoxes_dict = load_bounding_boxes(boundingBox_file, input_path)
+    
+    # Determine if we should auto-generate bounding boxes
+    should_auto_generate = auto_boundingBox and not boundingBoxes_dict
+    
+    # Set up output folder
+    output_folder = Path(output_dir) if output_dir else input_path
+    
+    # Report bounding box status
+    if boundingBoxes_dict:
+        print(f"Using {len(boundingBoxes_dict)} bounding boxes from metadata")
+    elif should_auto_generate:
+        print(f"No bounding box metadata found. Will auto-generate using {boundingBox_method} filter.")
     else:
-        print(f"\n✅ Finished entire run in {seconds:.2f}s")
+        print(f"Auto bounding box generation is disabled. Please provide a JSON file with bounding box data.")
+    
+    # Find media files - this will handle both nested and flat directory structures
+    folders_to_process = find_media_files(input_path)
+    
+    if not folders_to_process:
+        print("⚠️ No media files found to process!")
+        return
+    
+    # Process each folder
+    for folder, files in folders_to_process.items():
+        # Determine whether to use the custom output folder or the media folder
+        target_output = output_folder if output_dir else folder
+        
+        print(f"\n📁 Processing folder: {folder}")
+        if folder != target_output:
+            print(f"  📤 Output directory: {target_output}")
+        
+        # Create necessary directories
+        masks_dir = target_output / "masks"
+        masks_dir.mkdir(exist_ok=True, parents=True)
+        
+        # Process all files in the folder
+        all_frames = []
+        
+        for idx, file in enumerate(files, 1):
+            file_name = file.name
+            print(f"  ▶ [{idx}/{len(files)}] {file_name}")
+            start_time = time.time()
+            
+            # Get frames from the file (image or video)
+            frame_paths = get_frames_from_path(
+                file,
+                output_dir=target_output / "frames",
+                use_fps=use_fps,
+                quiet=quiet,
+                force_extract=force_extract
+            )
+            
+            # Add frames to the collection
+            all_frames.extend(frame_paths)
+            
+            process_time = time.time() - start_time
+            print(f"  ✓ Processed in {process_time:.2f}s")
+        
+        # Generate bounding boxes and segment all frames
+        if all_frames:
+            # Process images to generate bounding boxes or use existing ones
+            boundingBoxes_dict = process_images(
+                image_files=all_frames,
+                output_folder=target_output,
+                method=boundingBox_method,
+                min_box_size=min_boundingBox_size,
+                existing_boundingBoxes=boundingBoxes_dict,
+                auto_generate=should_auto_generate,
+                save_debug=True
+            )
+            
+            # Segment and save outputs for all frames
+            segment_and_save_outputs(
+                frames=all_frames,
+                output_root=target_output,
+                method=method,
+                frame_to_boundingBoxes=boundingBoxes_dict
+            )
+    
+    total_time = time.time() - total_start
+    print(f"\n✨ Total processing time: {total_time:.2f}s")
+
+def parse_arguments():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description="Dr-SAM Angiogram Segmentation Pipeline")
+    
+    # Main arguments
+    parser.add_argument("input", nargs="?", default=None,
+                       help="Path to input folder containing videos/images")
+    parser.add_argument("--method", type=str, default="median", 
+                       help="Transformation method (none, median, frangi, clahe, tophat, hessian)")
+    parser.add_argument("--boundingBox-method", type=str, default="frangi",
+                       choices=["frangi", "clahe", "hessian", "median", "original", "raw"],
+                       help="Method to use for vessel map generation")
+    parser.add_argument("--fps", action="store_true",
+                       help="Extract frames at 2 FPS instead of 1 frame/sec")
+    parser.add_argument("--quiet", action="store_true",
+                       help="Suppress verbose output")
+    
+    # Bounding box generation options
+    parser.add_argument("--no-auto-boundingBox", dest="auto_boundingBox", action="store_false",
+                       help="Disable automatic bounding box generation (requires bounding box metadata)")
+    parser.add_argument("--min-boundingBox-size", type=int, default=2000,
+                       help="Minimum size for auto-generated bounding boxes")
+    
+    # Processing options
+    parser.add_argument("--force-extract", action="store_true",
+                       help="Force re-extraction of frames from videos even if they exist")
+    
+    # Output arguments
+    parser.add_argument("--output-dir", type=str, default=None,
+                       help="Custom output directory")
+    parser.add_argument("--user-provided-boundingBoxes", type=str, default=None,
+                       help="Path to JSON file with bounding box metadata")
+    
+    # Set defaults
+    parser.set_defaults(auto_boundingBox=True)
+    
+    args = parser.parse_args()
+    
+    # If no input is provided, show help and exit
+    if args.input is None:
+        parser.print_help()
+        sys.exit(1)
+    
+    return args
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Dr-SAM segmentation pipeline")
-    parser.add_argument("root_dir", type=str, help="Path to angios folder")
-    parser.add_argument("--use-fps", action="store_true", help="Use 2 fps frame stepping (default: 1 fps)")
-    parser.add_argument("--verbose", action="store_true", help="Enable verbose ffmpeg output")
-    parser.add_argument("--transform", type=str, default="none", help="Image transform: none, clahe, tophat, frangi, hessian")
-    parser.add_argument("--box-transform", type=str, default="frangi", help="Transform to apply before box generation")
-    parser.add_argument("--min-box-size", type=int, default=2000, help="Minimum size for keeping auto boxes")
-    args = parser.parse_args()
-
+    args = parse_arguments()
+    
+    # Run main pipeline
     main(
-        Path(args.root_dir),
-        use_fps=args.use_fps,
-        transform=args.transform,
-        quiet=not args.verbose,
-        auto_box=True,
-        box_transform=args.box_transform,
-        min_box_size=args.min_box_size
+        input_path=args.input,
+        use_fps=args.fps,
+        method=args.method,
+        quiet=args.quiet,
+        auto_boundingBox=args.auto_boundingBox,
+        boundingBox_method=args.boundingBox_method,
+        min_boundingBox_size=args.min_boundingBox_size,
+        user_provided_boundingBoxes=None,  # No pre-loaded boxes in normal mode
+        boundingBox_file=args.user_provided_boundingBoxes,
+        output_dir=args.output_dir,
+        force_extract=args.force_extract
     )

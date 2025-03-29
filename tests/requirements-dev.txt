@@ -1,0 +1,10 @@
+# Requirements for testing and development
+pytest==7.4.0
+pytest-cov==4.1.0
+tqdm==4.66.1
+matplotlib==3.7.2
+numpy>=1.21.0
+opencv-python>=4.5.5
+torch>=2.0.0
+pillow>=10.0.0
+scikit-image>=0.20.0 

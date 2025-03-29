@@ -1,5 +1,5 @@
 # File: segmentation/segmentationPipeline.py
-# Version: 0.11 (adds traceback logging for segmentation exceptions)
+# Version: 0.12 (standardizes terminology to use "boundingBox" consistently)
 # Purpose: Run Dr-SAM on a list of frames and save all relevant outputs
 
 import sys
@@ -10,11 +10,17 @@ import cv2
 import traceback
 from segmentation.segment_vessels import segment_vessels
 
-def segment_and_save_outputs(frames, output_root, transform="none", frame_to_boxes=None):
+def segment_and_save_outputs(frames, output_root, method="median", frame_to_boundingBoxes=None):
     """
     Run Dr-SAM segmentation on each frame and save mask, skeletons, debug images.
+    
+    Args:
+        frames: List of frames to process
+        output_root: Root directory for outputs
+        method: Image transformation method
+        frame_to_boundingBoxes: Dictionary mapping filenames to bounding boxes
     """
-    frame_to_boxes = frame_to_boxes or {}
+    frame_to_boundingBoxes = frame_to_boundingBoxes or {}
 
     mask_dir = output_root / "masks"
     debug_dir = output_root / "debug"
@@ -27,10 +33,10 @@ def segment_and_save_outputs(frames, output_root, transform="none", frame_to_box
 
     for frame in frames:
         try:
-            input_boxes = frame_to_boxes.get(frame.name)
-            result = segment_vessels(str(frame), apply_anomaly_filter=True, transform=transform, input_boxes=input_boxes)
+            input_boundingBoxes = frame_to_boundingBoxes.get(frame.name)
+            result = segment_vessels(str(frame), apply_anomaly_filter=True, method=method, input_boundingBoxes=input_boundingBoxes)
 
-            suffix = f"_{transform}" if transform != "none" else ""
+            suffix = f"_{method}" if method != "none" else ""
 
             for i, mask in enumerate(result["masks"]):
                 out_name = f"{frame.stem}_mask_{i}.png"

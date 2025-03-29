@@ -33,18 +33,38 @@ def apply_hessian(image_np):
     return cv2.cvtColor(norm, cv2.COLOR_GRAY2RGB)
 
 def apply_median_filter(image_np):
+    """
+    Applies a Mode filter (which is similar to a median filter but preserves edges better)
+    This is the default filter used in the original DrSAM implementation.
+    """
     image_pil = Image.fromarray(image_np)
+    # Apply the mode filter with kernel size 7, matching original DrSAM
     image_filtered = image_pil.filter(ImageFilter.ModeFilter(size=7))
     return np.array(image_filtered)
 
-def apply_transform(image_np, transform="median"):
-    if transform == "clahe":
+def apply_transform(image_np, method="median"):
+    """
+    Apply the specified transformation to enhance vessel-like structures.
+    Available methods:
+        - "median": Mode filter (default - original DrSAM approach)
+        - "none": No transformation, returns original image
+        - "clahe": Contrast Limited Adaptive Histogram Equalization
+        - "tophat": Top-hat morphological operation
+        - "frangi": Frangi vessel enhancement filter
+        - "hessian": Hessian-based vessel enhancement
+    """
+    if method == "none":
+        return image_np
+    elif method == "clahe":
         return apply_clahe(image_np)
-    elif transform == "tophat":
+    elif method == "tophat":
         return apply_tophat(image_np)
-    elif transform == "frangi":
+    elif method == "frangi":
         return apply_frangi(image_np)
-    elif transform == "hessian":
+    elif method == "hessian":
         return apply_hessian(image_np)
+    elif method == "median":
+        return apply_median_filter(image_np)
     else:
+        print(f"[WARNING] Unknown transform method '{method}', using median filter")
         return apply_median_filter(image_np)

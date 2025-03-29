@@ -1,5 +1,5 @@
 # File: segment_vessels.py
-# Version: 0.18 (fixes bad indent after mask check and removes shape indexing crash)
+# Version: 0.19 (standardizes terminology to use "boundingBox" consistently)
 
 import sys
 import os
@@ -24,14 +24,26 @@ def segment_vessels(
     apply_anomaly_filter=True,
     model_type="vit_h",
     device=None,
-    transform="median",
-    input_boxes=None,
+    method="median",
+    input_boundingBoxes=None,
 ):
     """
     Dr-SAM segmentation and anomaly detection pipeline (Section 3.1 + 4.1).
     Fully defers to segmentize() for prompt point generation and refinement.
-    Accepts optional list of input_boxes for multi-ROI support.
+    Accepts optional list of input_boundingBoxes for multi-ROI support.
     Returns all masks [N, H, W] and preserves skeleton/anomaly analysis.
+    
+    Args:
+        image_path: Path to the image file
+        model_path: Path to the SAM model weights
+        apply_anomaly_filter: Whether to detect anomalies in vessels
+        model_type: SAM model type (vit_h, vit_b, vit_l)
+        device: Device to run on (None for auto)
+        method: Image transformation method
+        input_boundingBoxes: List of bounding boxes for vessel ROIs
+        
+    Returns:
+        Dictionary with masks, skeletons, anomalies, and input points
     """
     image = cv2.imread(image_path)
     if image is None:
@@ -39,22 +51,22 @@ def segment_vessels(
     image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
     # Apply preprocessing transform
-    image_np = apply_transform(image_rgb, transform)
+    image_np = apply_transform(image_rgb, method=method)
 
     height, width = image_np.shape[:2]
-    if input_boxes is None:
-        input_boxes = torch.tensor([[0, 0, width, height]])
-    elif isinstance(input_boxes, list):
-        input_boxes = torch.tensor(input_boxes, dtype=torch.int64)
+    if input_boundingBoxes is None:
+        input_boundingBoxes = torch.tensor([[0, 0, width, height]])
+    elif isinstance(input_boundingBoxes, list):
+        input_boundingBoxes = torch.tensor(input_boundingBoxes, dtype=torch.int64)
 
-    if input_boxes.ndim != 2 or input_boxes.shape[1] != 4:
-        raise ValueError("input_boxes must have shape [N, 4]")
+    if input_boundingBoxes.ndim != 2 or input_boundingBoxes.shape[1] != 4:
+        raise ValueError("input_boundingBoxes must have shape [N, 4]")
 
     # Load SAM predictor
     predictor = load_model(model_type=model_type, model_path=model_path, device=device)
 
     # Full segmentation using Dr-SAM's 5-point refinement
-    result = segmentize(image_np, input_boxes, predictor)
+    result = segmentize(image_np, input_boundingBoxes, predictor)
 
     masks_tensor = result["masks"]
     if masks_tensor is None or not isinstance(masks_tensor, torch.Tensor) or masks_tensor.numel() == 0:
