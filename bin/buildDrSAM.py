@@ -1,5 +1,5 @@
 # File: buildDrSAM.py
-# Version: 0.27 (removes testing logic in favor of separate testing framework)
+# Version: 0.28 (adds COCO format support)
 """
 Dr-SAM Angiogram Segmentation Pipeline
 ---------------------------------------
@@ -31,7 +31,7 @@ from utils.io import (
     get_frames_from_path,
 )
 from segmentation.segmentationPipeline import segment_and_save_outputs
-from preprocessing.bounding_boxes import process_images, load_bounding_boxes
+from preprocessing.bounding_boxes import process_images, load_bounding_boxes, save_bounding_boxes
 from preprocessing.transforms import apply_transform
 
 FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
@@ -52,7 +52,7 @@ _run_build_dependencies_if_needed()
 
 def main(input_path, use_fps=False, method="median", quiet=True, auto_boundingBox=True, 
          boundingBox_method="frangi", min_boundingBox_size=2000, user_provided_boundingBoxes=None, 
-         boundingBox_file=None, output_dir=None, force_extract=False):
+         boundingBox_file=None, output_dir=None, force_extract=False, output_format="both"):
     """
     Main DrSAM pipeline function.
     
@@ -68,6 +68,7 @@ def main(input_path, use_fps=False, method="median", quiet=True, auto_boundingBo
         boundingBox_file: Path to JSON file containing bounding box information
         output_dir: Custom output directory
         force_extract: Whether to force re-extraction of frames from videos
+        output_format: Format for output annotations ('drsam', 'coco', or 'both')
     """
     print(f"📂 Processing: {input_path}")
     input_path = Path(input_path)
@@ -150,6 +151,18 @@ def main(input_path, use_fps=False, method="median", quiet=True, auto_boundingBo
                 save_debug=True
             )
             
+            # Save annotations in the requested format(s)
+            if output_format != "both":
+                # If only one format is requested, delete the other format that was created by process_images
+                if output_format == "drsam":
+                    coco_path = target_output / "annotations_coco.json"
+                    if coco_path.exists():
+                        os.remove(coco_path)
+                elif output_format == "coco":
+                    drsam_path = target_output / "boundingBoxes.json"
+                    if drsam_path.exists():
+                        os.remove(drsam_path)
+            
             # Segment and save outputs for all frames
             segment_and_save_outputs(
                 frames=all_frames,
@@ -192,12 +205,56 @@ def parse_arguments():
     parser.add_argument("--output-dir", type=str, default=None,
                        help="Custom output directory")
     parser.add_argument("--user-provided-boundingBoxes", type=str, default=None,
-                       help="Path to JSON file with bounding box metadata")
+                       help="Path to JSON file with bounding box metadata (Dr-SAM or COCO format)")
+    parser.add_argument("--output-format", type=str, default="both", choices=["drsam", "coco", "both"],
+                       help="Format for output annotations")
+    
+    # COCO format conversion utilities
+    coco_group = parser.add_argument_group("COCO Format Utilities")
+    coco_group.add_argument("--convert-to-coco", type=str, default=None, metavar="DRSAM_JSON",
+                          help="Convert Dr-SAM format JSON to COCO format without running segmentation")
+    coco_group.add_argument("--convert-to-drsam", type=str, default=None, metavar="COCO_JSON",
+                          help="Convert COCO format JSON to Dr-SAM format without running segmentation")
+    coco_group.add_argument("--image-dir", type=str, default=None,
+                          help="Image directory for COCO conversion (required for --convert-to-coco)")
+    coco_group.add_argument("--output-json", type=str, default=None,
+                          help="Output path for conversion (default: input_path with new extension)")
     
     # Set defaults
     parser.set_defaults(auto_boundingBox=True)
     
     args = parser.parse_args()
+    
+    # Handle COCO conversion utilities
+    if args.convert_to_coco or args.convert_to_drsam:
+        if args.convert_to_coco and not args.image_dir:
+            parser.error("--image-dir is required when using --convert-to-coco")
+        
+        # Import COCO utilities
+        from utils.coco_utils import drsam_to_coco, coco_to_drsam
+        
+        if args.convert_to_coco:
+            # Convert Dr-SAM to COCO
+            input_path = Path(args.convert_to_coco)
+            output_path = Path(args.output_json) if args.output_json else input_path.with_suffix('.coco.json')
+            
+            print(f"Converting Dr-SAM format '{input_path}' to COCO format '{output_path}'")
+            with open(input_path, 'r') as f:
+                drsam_data = json.load(f)
+            
+            drsam_to_coco(drsam_data, args.image_dir, output_path)
+            print("Conversion complete.")
+            sys.exit(0)
+        
+        elif args.convert_to_drsam:
+            # Convert COCO to Dr-SAM
+            input_path = Path(args.convert_to_drsam)
+            output_path = Path(args.output_json) if args.output_json else input_path.with_suffix('.drsam.json')
+            
+            print(f"Converting COCO format '{input_path}' to Dr-SAM format '{output_path}'")
+            coco_to_drsam(input_path, output_path)
+            print("Conversion complete.")
+            sys.exit(0)
     
     # If no input is provided, show help and exit
     if args.input is None:
@@ -221,5 +278,6 @@ if __name__ == "__main__":
         user_provided_boundingBoxes=None,  # No pre-loaded boxes in normal mode
         boundingBox_file=args.user_provided_boundingBoxes,
         output_dir=args.output_dir,
-        force_extract=args.force_extract
+        force_extract=args.force_extract,
+        output_format=args.output_format
     )

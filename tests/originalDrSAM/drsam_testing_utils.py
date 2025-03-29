@@ -1,5 +1,6 @@
 # File: tests/originalDrSAM/drsam_testing_utils.py
 # Purpose: Testing utilities specific to the original Dr-SAM validation
+# Version: 0.02 (adds COCO format support)
 
 import os
 import sys
@@ -164,7 +165,7 @@ class SegmentationValidator:
 
 
 def get_drsam_command(dataset_path, method="median", output_dir=None, 
-                     boundingBoxes_file=None, verbose=False):
+                     boundingBoxes_file=None, verbose=False, output_format="both"):
     """
     Build the command to run the Dr-SAM pipeline.
     
@@ -174,6 +175,7 @@ def get_drsam_command(dataset_path, method="median", output_dir=None,
         output_dir: Custom output directory
         boundingBoxes_file: Path to user-provided boundingBoxes JSON file
         verbose: Whether to enable verbose output
+        output_format: Format for output annotations ('drsam', 'coco', or 'both')
         
     Returns:
         List of command arguments
@@ -202,6 +204,10 @@ def get_drsam_command(dataset_path, method="median", output_dir=None,
     else:
         print("No bounding boxes file provided. Auto-generation will be used if enabled.")
     
+    # Add output format if not both
+    if output_format != "both":
+        cmd.extend(["--output-format", output_format])
+    
     # Add quiet flag if not verbose
     if not verbose:
         cmd.append("--quiet")
@@ -210,7 +216,7 @@ def get_drsam_command(dataset_path, method="median", output_dir=None,
 
 
 def run_drsam_pipeline(dataset_path, method="median", output_dir="tests/outputs", 
-                      boundingBoxes_dict=None, verbose=False):
+                      boundingBoxes_dict=None, verbose=False, output_format="both"):
     """
     Run the Dr-SAM pipeline with the given parameters.
     
@@ -220,6 +226,7 @@ def run_drsam_pipeline(dataset_path, method="median", output_dir="tests/outputs"
         output_dir: Custom output directory
         boundingBoxes_dict: Dictionary of bounding boxes or path to JSON file
         verbose: Whether to enable verbose output
+        output_format: Format for output annotations ('drsam', 'coco', or 'both')
         
     Returns:
         True if successful, False otherwise
@@ -252,31 +259,183 @@ def run_drsam_pipeline(dataset_path, method="median", output_dir="tests/outputs"
             method=method,
             output_dir=output_dir,
             boundingBoxes_file=boundingBoxes_file,
-            verbose=verbose
+            verbose=verbose,
+            output_format=output_format
         )
         
         print(f"Running command: {' '.join(cmd)}")
-        
-        # Use subprocess.PIPE for capturing output
-        process = subprocess.run(cmd, 
-                                capture_output=not verbose,
-                                text=True,  # Return strings rather than bytes
-                                check=True) 
-        
-        if not verbose and process.stdout:
-            print(f"STDOUT: {process.stdout}")
-            
+        subprocess.run(cmd, check=True)
         return True
-        
+    
     except subprocess.CalledProcessError as e:
-        print(f"Error running Dr-SAM pipeline: {e}")
-        if hasattr(e, 'stdout') and e.stdout:
-            print(f"STDOUT: {e.stdout}")
-        if hasattr(e, 'stderr') and e.stderr:
-            print(f"STDERR: {e.stderr}")
+        print(f"Error running command: {e}")
         return False
-        
+    
     finally:
         # Clean up temporary files
-        if temp_boundingBoxes_file and os.path.exists(temp_boundingBoxes_file):
-            os.remove(temp_boundingBoxes_file) 
+        if temp_boundingBoxes_file and temp_boundingBoxes_file.exists():
+            try:
+                os.remove(temp_boundingBoxes_file)
+                print(f"Removed temporary file: {temp_boundingBoxes_file}")
+            except Exception as e:
+                print(f"Warning: Could not remove temporary file: {e}")
+
+
+def convert_original_drsam_to_coco(original_format_path, image_dir, output_path=None):
+    """
+    Convert original Dr-SAM format (array of objects) to COCO format.
+    
+    The original Dr-SAM format is an array of objects with:
+    - image_id: The image ID
+    - bboxes: List of bounding boxes in [x1, y1, x2, y2] format
+    
+    Args:
+        original_format_path: Path to original Dr-SAM format JSON file
+        image_dir: Directory containing the images (needed for dimensions)
+        output_path: Optional path to save COCO format JSON file
+        
+    Returns:
+        COCO format dictionary
+    """
+    # Import COCO utilities
+    repo_root = Path(__file__).resolve().parents[2]
+    sys.path.append(str(repo_root))
+    
+    from utils.coco_utils import create_coco_skeleton
+    
+    # Load original Dr-SAM format
+    with open(original_format_path, 'r') as f:
+        original_data = json.load(f)
+    
+    # Create COCO skeleton
+    coco_data = create_coco_skeleton()
+    
+    # Track IDs
+    image_id = 1
+    annotation_id = 1
+    
+    # Convert each entry
+    for item in original_data:
+        original_image_id = item.get("image_id")
+        bboxes = item.get("bboxes", [])
+        
+        if not original_image_id or not bboxes:
+            continue
+        
+        # Find the image file
+        image_path = None
+        potential_matches = list(Path(image_dir).glob(f"**/*{original_image_id}*"))
+        
+        if potential_matches:
+            # Find the one that's most likely an image
+            for match in potential_matches:
+                if match.suffix.lower() in ['.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff']:
+                    image_path = match
+                    break
+            
+            if not image_path:
+                image_path = potential_matches[0]
+        
+        if not image_path:
+            print(f"Warning: Could not find image for ID {original_image_id}")
+            continue
+        
+        # Get image dimensions
+        try:
+            img = cv2.imread(str(image_path))
+            if img is None:
+                print(f"Warning: Could not read image {image_path}")
+                continue
+                
+            height, width = img.shape[:2]
+        except Exception as e:
+            print(f"Error reading image {image_path}: {e}")
+            continue
+        
+        # Add image to COCO dataset
+        coco_data["images"].append({
+            "id": image_id,
+            "file_name": image_path.name,
+            "width": width,
+            "height": height,
+            "original_id": original_image_id,
+            "date_captured": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "license": 1,
+        })
+        
+        # Add each bounding box as an annotation
+        for box in bboxes:
+            if len(box) != 4:
+                continue
+                
+            x1, y1, x2, y2 = box
+            box_width = x2 - x1
+            box_height = y2 - y1
+            
+            coco_data["annotations"].append({
+                "id": annotation_id,
+                "image_id": image_id,
+                "category_id": 1,  # vessel category
+                "bbox": [x1, y1, box_width, box_height],  # COCO uses [x, y, width, height]
+                "area": box_width * box_height,
+                "segmentation": [],  # Empty for box-only annotations
+                "iscrowd": 0
+            })
+            
+            annotation_id += 1
+        
+        image_id += 1
+    
+    # Save to file if output path provided
+    if output_path:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(output_path, 'w') as f:
+            json.dump(coco_data, f, indent=2)
+            
+        print(f"COCO annotations saved to {output_path}")
+    
+    return coco_data
+
+
+def convert_original_drsam_to_drsam_format(original_format_path, output_path=None):
+    """
+    Convert original Dr-SAM format (array of objects) to our Dr-SAM format (filename to boxes map).
+    
+    Args:
+        original_format_path: Path to original Dr-SAM format JSON file
+        output_path: Optional path to save our Dr-SAM format JSON file
+        
+    Returns:
+        Dictionary mapping filenames to lists of bounding boxes
+    """
+    # Load original Dr-SAM format
+    with open(original_format_path, 'r') as f:
+        original_data = json.load(f)
+    
+    # Convert to our format
+    drsam_boxes = {}
+    
+    for item in original_data:
+        image_id = item.get("image_id")
+        bboxes = item.get("bboxes", [])
+        
+        if not image_id or not bboxes:
+            continue
+        
+        # Use image_id as filename (our pipeline will handle finding the actual file)
+        filename = f"{image_id}.png"
+        drsam_boxes[filename] = bboxes
+    
+    # Save to file if output path provided
+    if output_path:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(output_path, 'w') as f:
+            json.dump(drsam_boxes, f, indent=2)
+            
+        print(f"Dr-SAM format boxes saved to {output_path}")
+    
+    return drsam_boxes 

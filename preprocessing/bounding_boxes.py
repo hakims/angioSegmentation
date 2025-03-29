@@ -1,5 +1,5 @@
 # File: preprocessing/bounding_boxes.py
-# Version: 0.08 (adds load_bounding_boxes utility function)
+# Version: 0.09 (adds COCO format support)
 # Purpose: Enhanced bounding box generation specifically tuned for vessel structures in angiogram images
 
 import cv2
@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 from .transforms import apply_transform
+from typing import Dict, List, Union, Optional
 
 def generate_boundingBoxes_from_vessel_map(vessel_prob_map: np.ndarray, min_size=2000, aspect_ratio_thresh=(0.05, 5.0), max_boundingBoxes=3) -> np.ndarray:
     """
@@ -68,6 +69,7 @@ def overlay_debug_outputs(image, vessel_map, boundingBoxes, save_path_prefix):
 def load_bounding_boxes(user_provided_path=None, media_folder=None):
     """
     Load bounding boxes from user-provided file or search for metadata in media folder.
+    Supports both Dr-SAM native format and COCO format.
     
     Args:
         user_provided_path: Optional path to user-provided JSON file
@@ -84,8 +86,19 @@ def load_bounding_boxes(user_provided_path=None, media_folder=None):
             user_path = Path(user_provided_path)
             if user_path.exists():
                 with open(user_path, 'r') as f:
-                    boundingBoxes_dict = json.load(f)
-                print(f"Loaded {len(boundingBoxes_dict)} bounding boxes from user-provided file: {user_path}")
+                    data = json.load(f)
+                
+                # Check if this is COCO format or Dr-SAM format
+                if "images" in data and "annotations" in data:
+                    # This is COCO format, convert to Dr-SAM format
+                    from utils.coco_utils import coco_to_drsam
+                    boundingBoxes_dict = coco_to_drsam(data)
+                    print(f"Loaded COCO format annotations from {user_path} and converted to Dr-SAM format")
+                else:
+                    # Assume Dr-SAM format
+                    boundingBoxes_dict = data
+                    print(f"Loaded {len(boundingBoxes_dict)} bounding boxes from user-provided file: {user_path}")
+                
                 return boundingBoxes_dict
             else:
                 print(f"Warning: User-provided bounding box file not found: {user_path}")
@@ -104,19 +117,25 @@ def load_bounding_boxes(user_provided_path=None, media_folder=None):
                     try:
                         with open(json_file, 'r') as f:
                             data = json.load(f)
+                        
+                        # Check if COCO format
+                        if isinstance(data, dict) and "images" in data and "annotations" in data:
+                            from utils.coco_utils import coco_to_drsam
+                            boundingBoxes_dict = coco_to_drsam(data)
+                            print(f"Found COCO format annotations in {json_file.name}")
+                            return boundingBoxes_dict
                             
-                        # Check if this JSON file contains bounding box information
-                        # (Basic check: at least one entry with numerical coordinates)
-                        if isinstance(data, dict) and any(
+                        # Check if Dr-SAM format (dictionary mapping filenames to bounding boxes)
+                        elif isinstance(data, dict) and any(
                             isinstance(v, list) and len(v) > 0 and 
                             all(isinstance(coord, (int, float)) for item in v for coord in item)
                             for v in data.values()
                         ):
                             boundingBoxes_dict = data
-                            print(f"Found bounding box metadata in {json_file.name} ({len(boundingBoxes_dict)} entries)")
+                            print(f"Found Dr-SAM format bounding box metadata in {json_file.name} ({len(boundingBoxes_dict)} entries)")
                             return boundingBoxes_dict
-                    except Exception:
-                        # Skip files that can't be parsed as JSON or don't have the right format
+                    except Exception as e:
+                        print(f"Error parsing {json_file.name}: {e}")
                         continue
                 
                 print(f"Searched {len(json_files)} JSON files in {media_folder}, but no valid bounding box data found")
@@ -124,6 +143,34 @@ def load_bounding_boxes(user_provided_path=None, media_folder=None):
             print(f"Error searching for metadata in media folder: {e}")
     
     return boundingBoxes_dict
+
+
+def save_bounding_boxes(boundingBoxes: Dict[str, List[List[int]]], output_path: Union[str, Path], 
+                       format: str = "drsam", image_dir: Optional[Union[str, Path]] = None) -> None:
+    """
+    Save bounding boxes to a file in the specified format.
+    
+    Args:
+        boundingBoxes: Dictionary mapping filenames to lists of bounding boxes
+        output_path: Path to save the JSON file
+        format: Format to save in ('drsam' or 'coco')
+        image_dir: Directory containing the images (needed for COCO format)
+    """
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    if format.lower() == "coco":
+        if image_dir is None:
+            raise ValueError("image_dir is required for COCO format")
+        
+        from utils.coco_utils import drsam_to_coco
+        drsam_to_coco(boundingBoxes, image_dir, output_path)
+    else:
+        # Save in Dr-SAM format
+        with open(output_path, 'w') as f:
+            json.dump(boundingBoxes, f, indent=2)
+        
+        print(f"Dr-SAM bounding boxes saved to {output_path}")
 
 
 def process_images(image_files, output_folder=None, method="frangi", min_box_size=2000, 
@@ -189,10 +236,24 @@ def process_images(image_files, output_folder=None, method="frangi", min_box_siz
                 boundingBoxes_np = np.array(boundingBox_data)
                 overlay_debug_outputs(image, vessel_map, boundingBoxes_np, str(debug_prefix))
     
-    # Save boundingBoxes to JSON file if output folder is provided
+    # Save boundingBoxes to JSON files if output folder is provided
     if output_folder:
-        boundingBoxes_path = Path(output_folder) / "boundingBoxes.json"
-        with open(boundingBoxes_path, 'w') as f:
-            json.dump(boundingBoxes_dict, f, indent=2)
+        output_folder_path = Path(output_folder)
+        
+        # Save in Dr-SAM format
+        drsam_path = output_folder_path / "boundingBoxes.json"
+        save_bounding_boxes(boundingBoxes_dict, drsam_path, format="drsam")
+        
+        # Also save in COCO format
+        coco_path = output_folder_path / "annotations_coco.json"
+        try:
+            save_bounding_boxes(
+                boundingBoxes_dict, 
+                coco_path, 
+                format="coco", 
+                image_dir=output_folder_path / "frames"
+            )
+        except Exception as e:
+            print(f"Error saving COCO format: {e}")
     
     return boundingBoxes_dict
