@@ -1,5 +1,33 @@
 # Dr-SAM Implementation Analysis Summary
 
+## Core Project Principles
+
+### Code Reuse and Utility Management
+- **Always Check Existing Utilities First**:
+  - Before writing new code, check the `utils` directory for existing functionality
+  - Common utilities are organized by purpose:
+    - `io.py`: File operations, media handling, frame extraction
+    - `vis.py`: Visualization and image processing
+    - `coco_utils.py`: COCO format operations
+    - `schema_utils.py`: Schema validation and metadata handling
+
+- **Avoid Code Duplication**:
+  - Never duplicate functionality that exists in utilities
+  - If similar code appears in multiple places, create a new utility function
+  - Keep utility functions focused and well-documented
+
+- **Utility Creation Guidelines**:
+  - Create new utility functions when a pattern emerges across multiple files
+  - Place utilities in the most appropriate existing file, or create a new one if needed
+  - Document the purpose and usage of each utility function
+  - Include example usage in docstrings
+
+- **Code Organization**:
+  - Main pipeline code should focus on orchestration and flow
+  - Implementation details should be in utility functions
+  - Keep files focused on a single responsibility
+  - Use clear, descriptive names for both files and functions
+
 ## Issues Identified and Resolved
 
 1. **Filter Application Issue**:
@@ -200,4 +228,165 @@ After analyzing how the original Dr-SAM handles metadata and our current approac
 5. **Performance Optimization**:
    - Profile the pipeline to identify bottlenecks
    - Implement parallel processing where appropriate
-   - Optimize memory usage for large videos 
+   - Optimize memory usage for large videos
+
+## Testing Framework Updates (March 30, 2024)
+
+### Key Changes Implemented
+
+1. **Modernized Testing Framework**
+   - Implemented comprehensive pytest-based testing framework
+   - Created modular test structure with clear separation of concerns
+   - Added support for different test types (single frame, multiple frame, schema)
+   - Implemented proper test output management with visualization support
+
+2. **Test Organization**
+   - Organized tests into logical categories:
+     - Single frame pipeline tests
+     - Multiple frame pipeline tests
+     - Schema validation tests
+     - Original Dr-SAM integration tests
+   - Created dedicated test utilities for common operations
+   - Implemented proper test data organization
+
+3. **Test Output Management**
+   - Added automatic test output cleanup
+   - Implemented `--keep-visualizations` flag for debugging
+   - Created `cleanupTests.py` utility for manual cleanup
+   - Organized outputs by test ID for better tracking
+
+4. **Test Fixtures and Utilities**
+   - Created core fixtures for common operations:
+     - `test_root`: Root directory for test data
+     - `output_dir`: Test-specific output directory
+     - `visualization_dir`: Test-specific visualization directory
+     - `schema`: CVAT labeling schema
+   - Implemented test case fixtures:
+     - `single_frame_case`: Single frame test cases
+     - `multiple_frame_case`: Multiple frame test cases
+     - `schema_test_case`: Schema validation test cases
+   - Added utility fixtures for metadata handling
+
+5. **Test Data Organization**
+   - Structured test data directory:
+     ```
+     tests/test_data/
+     ├── single_frame/       # Single frame test cases
+     ├── multiple_frame/     # Multiple frame test cases
+     └── schema/            # Schema validation test cases
+     ```
+   - Each test case follows a consistent structure
+   - Added support for metadata validation
+
+6. **Visualization Support**
+   - Added comprehensive visualization utilities
+   - Implemented automatic visualization saving
+   - Created support for debugging outputs
+   - Added visualization cleanup options
+
+### Current Testing Capabilities
+
+1. **Test Execution**
+   ```bash
+   # Run all tests
+   pytest
+   
+   # Run specific test categories
+   pytest -m single_frame
+   pytest -m multiple_frame
+   pytest -m schema
+   
+   # Run with visualization preservation
+   pytest --keep-visualizations
+   ```
+
+2. **Test Output Management**
+   ```bash
+   # Clean all test outputs
+   python tests/cleanupTests.py
+   
+   # Clean specific directory
+   python tests/cleanupTests.py path/to/directory
+   
+   # Keep visualizations while cleaning
+   python tests/cleanupTests.py --keep-visualizations
+   ```
+
+3. **Test Case Creation**
+   - Support for single frame test cases
+   - Support for multiple frame test cases
+   - Support for schema validation test cases
+   - Automatic test case discovery
+
+### Outstanding Testing Tasks
+
+1. **Test Coverage**
+   - Need to add more comprehensive test cases
+   - Improve coverage of edge cases
+   - Add performance benchmarks
+   - Implement regression tests
+
+2. **Test Data**
+   - Need more diverse test cases
+   - Add more complex scenarios
+   - Include edge cases and error conditions
+   - Create synthetic test data
+
+3. **Visualization Improvements**
+   - Add more visualization options
+   - Improve debugging output
+   - Create comparison visualizations
+   - Add interactive visualization support
+
+4. **Documentation**
+   - Add more test case examples
+   - Document test data requirements
+   - Create troubleshooting guide
+   - Add performance guidelines
+
+### Next Steps for Testing
+
+1. **Test Coverage Expansion**
+   - Add more test cases for edge conditions
+   - Implement performance benchmarks
+   - Add regression test suite
+   - Create synthetic test data generator
+
+2. **Test Infrastructure**
+   - Add CI/CD integration
+   - Implement test result reporting
+   - Add test coverage reporting
+   - Create test result dashboard
+
+3. **Test Documentation**
+   - Create comprehensive test guide
+   - Document test case creation process
+   - Add troubleshooting documentation
+   - Create test data guidelines
+
+4. **Test Automation**
+   - Add automated test result analysis
+   - Implement automated visualization comparison
+   - Create automated performance tracking
+   - Add automated test case generation
+
+## Original DrSAM Integration
+- Original Dr-SAM comparison tests have been preserved but moved to use the new testing utilities
+- The DrSAMValidator class is now available via the centralized import from `tests.test_utils.drsam_testing_utils`
+
+## Issues Fixed
+- Corrected import references that were causing ModuleNotFoundError
+- Fixed pytest collection errors caused by test classes with __init__ methods
+- Resolved marker registration with proper pytest.ini configuration
+- Simplified test logic to avoid unnecessary conversions
+
+## Using the Test Framework
+Running tests is now done using standard pytest commands:
+```
+pytest                 # Run all tests
+pytest -m single_frame # Run only single frame tests
+pytest -v              # Run with verbose output
+```
+
+## Additional Notes
+The commented-out pipeline tests should be implemented when ready, but for now they serve as documentation of intended functionality. These tests will validate the end-to-end pipeline process including vessel segmentation and stenosis calculation. 

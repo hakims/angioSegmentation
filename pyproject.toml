@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_functions = "test_*"
+python_classes = "Test*"
+addopts = "-v --strict-markers"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "schema: marks tests related to schema validation",
+]
+
+[tool.coverage.run]
+source = ["segmentation", "preprocessing", "utils"]
+omit = ["*/tests/*", "setup.py"]
+
+[tool.setuptools]
+packages = ["segmentation", "preprocessing", "utils"]
+
+[project]
+name = "drsam"
+version = "0.1.0"
+description = "Dr-SAM Angiogram Segmentation Pipeline"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.8"
+dependencies = [
+    "torch>=2.0.0",
+    "opencv-python>=4.5.5", 
+    "numpy>=1.21.0",
+    "pillow>=10.0.0",
+    "scikit-image>=0.20.0",
+    "tqdm>=4.66.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "matplotlib>=3.7.0",
+] 

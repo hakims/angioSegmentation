@@ -1,0 +1,292 @@
+[
+  {
+    "name": "vessel",
+    "attributes": [
+      {
+        "name": "vessel_id",
+        "input_type": "select",
+        "default_value": "SFA",
+        "mutable": true,
+        "values": [
+          "aorta",
+          "innominate",
+          "CCA",
+          "ICA",
+          "ECA",
+          "VA",
+          "subclavian",
+          "axillary",
+          "brachial",
+          "radial",
+          "ulnar",
+          "palmar-arch",
+          "celiac",
+          "SMA",
+          "IMA",
+          "renal",
+          "CIA",
+          "EIA",
+          "IIA",
+          "CFA",
+          "circumflex femoral",
+          "profunda",
+          "SFA",
+          "pop",
+          "TPT",
+          "AT",
+          "PT",
+          "peroneal",
+          "AVF",
+          "bypass"
+        ]
+      },
+      {
+        "name": "side",
+        "input_type": "select",
+        "default_value": "N/A",
+        "mutable": true,
+        "values": [
+          "L",
+          "R",
+          "B",
+          "N/A"
+        ]
+      },
+      {
+        "name": "segment",
+        "input_type": "select",
+        "default_value": "",
+        "mutable": true,
+        "values": [
+          "",
+          "proximal",
+          "mid",
+          "distal",
+          "AK",
+          "BK"
+        ]
+      },
+      {
+        "name": "aortic_zone",
+        "input_type": "select",
+        "default_value": "",
+        "mutable": true,
+        "values": [
+          "",
+          "0",
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "10",
+          "11"
+        ]
+      },
+      {
+        "name": "anomaly_type",
+        "input_type": "select",
+        "default_value": "none",
+        "mutable": true,
+        "values": [
+          "none",
+          "stenosis",
+          "aneurysm",
+          "dissection",
+          "occlusion"
+        ]
+      },
+      {
+        "name": "modality",
+        "input_type": "select",
+        "default_value": "DSA",
+        "mutable": true,
+        "values": [
+          "DSA",
+          "CO2-DSA",
+          "CT",
+          "MRA",
+          "X-ray"
+        ]
+      },
+      {
+        "name": "avf_type",
+        "input_type": "select",
+        "default_value": "",
+        "mutable": true,
+        "values": [
+          "",
+          "brachiocephalic",
+          "radiocephalic",
+          "brachiobasilic"
+        ]
+      },
+      {
+        "name": "conduit",
+        "input_type": "select",
+        "default_value": "",
+        "mutable": true,
+        "values": [
+          "",
+          "vein",
+          "PTFE graft",
+          "Dacron",
+          "cryo",
+          "unknown"
+        ]
+      },
+      {
+        "name": "bypass_type",
+        "input_type": "select",
+        "default_value": "",
+        "mutable": true,
+        "values": [
+          "",
+          "fem-pop",
+          "fem-distal",
+          "aorto-bifem",
+          "ax-bifem",
+          "fem-fem",
+          "ilio-femoral",
+          "ax-fem",
+          "pop-distal"
+        ]
+      },
+      {
+        "name": "annotator",
+        "input_type": "select",
+        "default_value": "human",
+        "mutable": true,
+        "values": [
+          "human",
+          "DrSAM",
+          "AI"
+        ]
+      },
+      {
+        "name": "label_schema_version",
+        "input_type": "select",
+        "default_value": "2025.03",
+        "mutable": true,
+        "values": [
+          "2025.03"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "bone",
+    "attributes": [
+      {
+        "name": "bone_id",
+        "input_type": "select",
+        "default_value": "femur",
+        "mutable": true,
+        "values": [
+          "femur",
+          "pelvis",
+          "tibia",
+          "fibula",
+          "humerus",
+          "radius",
+          "ulna",
+          "calcaneus"
+        ]
+      },
+      {
+        "name": "side",
+        "input_type": "select",
+        "default_value": "N/A",
+        "mutable": true,
+        "values": [
+          "L",
+          "R",
+          "B",
+          "N/A"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "device",
+    "attributes": [
+      {
+        "name": "device_type",
+        "input_type": "select",
+        "default_value": "stent",
+        "mutable": true,
+        "values": [
+          "stent",
+          "catheter",
+          "sheath",
+          "wire",
+          "balloon",
+          "EVAR",
+          "TEVAR",
+          "IBE",
+          "clip",
+          "coil"
+        ]
+      },
+      {
+        "name": "side",
+        "input_type": "select",
+        "default_value": "N/A",
+        "mutable": true,
+        "values": [
+          "L",
+          "R",
+          "B",
+          "N/A"
+        ]
+      },
+      {
+        "name": "aortic_zone",
+        "input_type": "select",
+        "default_value": "",
+        "mutable": true,
+        "values": [
+          "",
+          "0",
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "10",
+          "11"
+        ]
+      },
+      {
+        "name": "modality",
+        "input_type": "select",
+        "default_value": "DSA",
+        "mutable": true,
+        "values": [
+          "DSA",
+          "CO2-DSA",
+          "CT",
+          "MRA",
+          "X-ray"
+        ]
+      },
+      {
+        "name": "deployment_zone",
+        "input_type": "select",
+        "default_value": "",
+        "mutable": true,
+        "values": [
+          ""
+        ]
+      }
+    ]
+  }
+]

@@ -6,7 +6,7 @@ including validation against the original Dr-SAM dataset.
 """
 
 # Import main components for convenience
-from tests.originalDrSAM import DrSAMValidator, run_drsam_pipeline
+from tests.test_utils.drsam_testing_utils import DrSAMValidator, run_drsam_pipeline
 
 __all__ = [
     'DrSAMValidator',

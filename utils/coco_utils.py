@@ -46,7 +46,23 @@ def create_coco_skeleton() -> Dict[str, Any]:
             {
                 "id": 1,
                 "name": "vessel",
-                "supercategory": "vessel"
+                "supercategory": "vessel",
+                "keypoints": [],
+                "skeleton": []
+            },
+            {
+                "id": 2,
+                "name": "bone",
+                "supercategory": "bone",
+                "keypoints": [],
+                "skeleton": []
+            },
+            {
+                "id": 3,
+                "name": "device",
+                "supercategory": "device",
+                "keypoints": [],
+                "skeleton": []
             }
         ],
         "images": [],
@@ -57,7 +73,8 @@ def create_coco_skeleton() -> Dict[str, Any]:
 def drsam_to_coco(
     drsam_boxes: Dict[str, List[List[int]]],
     image_dir: Union[str, Path],
-    output_path: Optional[Union[str, Path]] = None
+    output_path: Optional[Union[str, Path]] = None,
+    attributes: Optional[Dict[str, Dict[str, Any]]] = None
 ) -> Dict[str, Any]:
     """
     Convert Dr-SAM format bounding boxes to COCO format.
@@ -66,6 +83,7 @@ def drsam_to_coco(
         drsam_boxes: Dictionary mapping filenames to lists of bounding boxes in Dr-SAM format [x1, y1, x2, y2]
         image_dir: Directory containing the images (needed to get image dimensions)
         output_path: Optional path to save the COCO JSON file
+        attributes: Optional dictionary mapping filenames to annotation attributes
         
     Returns:
         COCO format dictionary
@@ -116,11 +134,35 @@ def drsam_to_coco(
             "license": 1,
         })
         
+        # Get attributes for this file if available
+        file_attributes = {}
+        if attributes and filename in attributes:
+            file_attributes = attributes[filename]
+        
         # Add each bounding box as an annotation
-        for box in boxes:
+        for box_idx, box in enumerate(boxes):
             x1, y1, x2, y2 = box
             width = x2 - x1
             height = y2 - y1
+            
+            # Default attributes if not specified
+            ann_attributes = {
+                "vessel_id": "SFA",
+                "side": "N/A",
+                "segment": "",
+                "aortic_zone": "",
+                "anomaly_type": "none",
+                "modality": "DSA",
+                "avf_type": "",
+                "conduit": "",
+                "bypass_type": "",
+                "annotator": "DrSAM",
+                "label_schema_version": "2025.03"
+            }
+            
+            # Override with file-specific attributes if available
+            if box_idx in file_attributes:
+                ann_attributes.update(file_attributes[box_idx])
             
             coco_data["annotations"].append({
                 "id": annotation_id,
@@ -129,7 +171,8 @@ def drsam_to_coco(
                 "bbox": [x1, y1, width, height],  # COCO uses [x, y, width, height]
                 "area": width * height,
                 "segmentation": [],  # Empty for box-only annotations
-                "iscrowd": 0
+                "iscrowd": 0,
+                "attributes": ann_attributes  # Add schema attributes
             })
             
             annotation_id += 1
@@ -151,17 +194,21 @@ def drsam_to_coco(
 
 def coco_to_drsam(
     coco_data: Union[Dict[str, Any], str, Path],
-    output_path: Optional[Union[str, Path]] = None
-) -> Dict[str, List[List[int]]]:
+    output_path: Optional[Union[str, Path]] = None,
+    include_attributes: bool = True
+) -> Tuple[Dict[str, List[List[int]]], Optional[Dict[str, Dict[str, Any]]]]:
     """
     Convert COCO format annotations to Dr-SAM format.
     
     Args:
         coco_data: COCO format dictionary or path to COCO JSON file
         output_path: Optional path to save the Dr-SAM format JSON file
+        include_attributes: Whether to extract and return attributes data
         
     Returns:
-        Dictionary mapping filenames to lists of bounding boxes in Dr-SAM format [x1, y1, x2, y2]
+        Tuple containing:
+        - Dictionary mapping filenames to lists of bounding boxes in Dr-SAM format [x1, y1, x2, y2]
+        - If include_attributes is True, a dictionary mapping filenames to annotation attributes
     """
     # Load COCO data if it's a file path
     if isinstance(coco_data, (str, Path)):
@@ -173,6 +220,9 @@ def coco_to_drsam(
     
     # Create Dr-SAM format dictionary
     drsam_boxes = {}
+    
+    # Create attributes dictionary if needed
+    attributes_dict = {} if include_attributes else None
     
     # Process each annotation
     for annotation in coco_data["annotations"]:
@@ -193,20 +243,35 @@ def coco_to_drsam(
         # Add to Dr-SAM boxes dictionary
         if filename not in drsam_boxes:
             drsam_boxes[filename] = []
+            if include_attributes:
+                attributes_dict[filename] = {}
             
+        box_idx = len(drsam_boxes[filename])
         drsam_boxes[filename].append(drsam_box)
+        
+        # Extract and store attributes if present
+        if include_attributes and "attributes" in annotation:
+            attributes_dict[filename][box_idx] = annotation["attributes"]
     
     # Save to file if output path provided
     if output_path:
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         
+        # For now, just save the bounding boxes
         with open(output_path, 'w') as f:
             json.dump(drsam_boxes, f, indent=2)
             
+        # If attributes are included, save them to a separate file
+        if include_attributes and attributes_dict:
+            attr_path = output_path.with_suffix('.attributes.json')
+            with open(attr_path, 'w') as f:
+                json.dump(attributes_dict, f, indent=2)
+            print(f"Attributes saved to {attr_path}")
+            
         print(f"Dr-SAM bounding boxes saved to {output_path}")
     
-    return drsam_boxes
+    return (drsam_boxes, attributes_dict) if include_attributes else (drsam_boxes, None)
 
 
 def load_coco_annotations(path: Union[str, Path]) -> Dict[str, Any]:

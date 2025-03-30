@@ -1,75 +1,69 @@
-# 🩺 Vascular Labeling Guidelines (Schema 2025.03)
+# 🩺 Vascular Labeling Guidelines (Schema v2025.03)
 
-This guide outlines how to label vascular structures in angiographic images using the CVAT schema `cvat_vascular_schema_2025.03.json`.
-
----
-
-## 📦 Categories
-
-| Name    | Description                             |
-|---------|-----------------------------------------|
-| vessel  | Arteries, AVFs, and surgical bypasses   |
-| bone    | Bony structures (femur, pelvis, etc.)   |
-| device  | Stents, wires, sheaths, etc.            |
+This guide describes how to use the CVAT labeling schema `cvat_labels_array_final_conduits_2025.03.json` for structured annotation of vascular imaging, including vessels, bones, and devices.
 
 ---
 
-## 🔖 Key Attributes for `vessel`
+## 🔖 Label Categories
 
-| Attribute        | Description |
+| Label       | Description                                        |
+|-------------|----------------------------------------------------|
+| `vessel`    | All native arteries, AVFs, and bypass grafts       |
+| `bone`      | Bones appearing in angiographic or X-ray images    |
+| `device`    | Implanted or procedural tools (stents, grafts, etc)|
+
+---
+
+## 🩺 Vessel Label Attributes
+
+| Attribute            | Type      | Description |
+|----------------------|-----------|-------------|
+| `vessel_id`          | select    | Name of the vessel or structure (e.g. `SFA`, `AVF`, `bypass`) |
+| `side`               | select    | Laterality: `L`, `R`, `B` (bilateral), or `N/A` |
+| `segment`            | select    | Optional: `proximal`, `mid`, `distal`, `AK`, `BK` |
+| `aortic_zone`        | select    | SVS zones 0–11 (only use if vessel is the aorta) |
+| `anomaly_type`       | select    | `none`, `stenosis`, `aneurysm`, `dissection`, `occlusion` |
+| `modality`           | select    | Imaging modality: `DSA` (default), `CO2-DSA`, `CT`, `MRA`, `X-ray` |
+| `avf_type`           | select    | Optional for `AVF`: `brachiocephalic`, `radiocephalic`, etc. |
+| `conduit`            | select    | For `AVF` or `bypass`: `vein`, `PTFE graft`, `Dacron`, `cryo`, `unknown` |
+| `bypass_type`        | select    | For `bypass`: `fem-pop`, `aorto-bifem`, `ax-bifem`, etc. |
+| `annotator`          | select    | Defaults to `human`; can be `DrSAM`, `AI` |
+| `label_schema_version` | select | Fixed: `2025.03` |
+
+---
+
+## 🦴 Bone Label Attributes
+
+| Attribute  | Description |
+|------------|-------------|
+| `bone_id`  | Bone name: `femur`, `pelvis`, `tibia`, `fibula`, `radius`, `ulna`, `humerus`, `calcaneus` |
+| `side`     | Laterality |
+
+---
+
+## ⚙️ Device Label Attributes
+
+| Attribute         | Description |
 |------------------|-------------|
-| `vessel_id`      | Canonical structure name (e.g., SFA, pop, AVF, bypass) |
-| `side`           | "L", "R", "B", or "N/A" for laterality |
-| `segment`        | Optional: "proximal", "mid", "distal", "AK", "BK" |
-| `aortic_zone`    | 0–11 (only for aorta and devices) |
-| `anomaly_type`   | "none", "stenosis", "aneurysm", "dissection", "occlusion" |
-| `modality`       | Imaging type — default is "DSA" |
-| `presence_only`  | Check if label is non-segmented flag |
-| `annotator`      | User/model label source |
-| `label_schema_version` | Fixed: "2025.03" |
+| `device_type`     | Type of device (e.g., `stent`, `catheter`, `EVAR`, `balloon`, etc.) |
+| `side`            | Device laterality if applicable |
+| `aortic_zone`     | SVS zone if relevant |
+| `modality`        | Imaging modality |
+| `deployment_zone` | Optional zone text (e.g., `2–4`, `bifurcation`) |
 
 ---
 
-## 🩺 Special Cases
+## 💡 Labeling Tips
 
-### ✅ AVFs
-Use `vessel_id: "AVF"` and optionally specify:
-- `avf_type`: "brachiocephalic", "radiocephalic", "brachiobasilic"
-- `conduit`: "vein", "PTFE graft", etc.
-
-### ✅ Bypasses
-Use `vessel_id: "bypass"` and set:
-- `bypass_type`: "fem-pop", "ax-bifem", etc.
-- `conduit`: "vein", "PTFE graft", "Dacron"
+- Only apply `aortic_zone` when `vessel_id = aorta` or device spans zones.
+- Use `bypass_type` and `conduit` only when `vessel_id = bypass`.
+- AVFs should be labeled as `vessel_id = AVF` and may include `avf_type` and `conduit`.
+- You do **not** need to fill every attribute — leave irrelevant fields blank.
 
 ---
 
-## 💡 Example Annotations
+## 📤 Export & Usage
 
-### Healthy CFA
-```json
-{ "vessel_id": "CFA", "side": "R", "anomaly_type": "none" }
-```
-
-### Distal SFA stenosis
-```json
-{ "vessel_id": "SFA", "side": "R", "segment": "distal", "anomaly_type": "stenosis" }
-```
-
-### SFA-to-pop bypass
-```json
-{ "vessel_id": "bypass", "bypass_type": "fem-pop", "conduit": "PTFE graft" }
-```
-
-### AVF with aneurysm
-```json
-{ "vessel_id": "AVF", "side": "L", "anomaly_type": "aneurysm", "avf_type": "radiocephalic" }
-```
-
----
-
-## 🧪 Tips
-
-- Always assign `vessel_id`, `side`, and `anomaly_type`.
-- Use `segment`, `aortic_zone`, and `conduit` **only when relevant**.
-- Set `presence_only: true` if no segmentation is drawn.
+- Export labels in **COCO 1.0** format from CVAT.
+- All attributes are embedded in the `annotations[*].attributes` block.
+- Metadata supports downstream parsing for segmentation, anomaly classification, and clinical filtering.

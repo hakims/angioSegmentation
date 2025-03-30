@@ -62,6 +62,50 @@ def print_coco_summary(coco_data):
             min_annotations = min(annotations_per_image.values())
             
             print(f"Annotations per image: Avg: {avg_annotations:.1f}, Min: {min_annotations}, Max: {max_annotations}")
+        
+        # Count annotations with attributes
+        annotations_with_attributes = sum(1 for ann in coco_data.get("annotations", []) if "attributes" in ann)
+        if annotations_with_attributes:
+            print(f"Annotations with attributes: {annotations_with_attributes} / {len(coco_data.get('annotations', []))} ({annotations_with_attributes / len(coco_data.get('annotations', [])) * 100:.1f}%)")
+            
+            # Count vessel_id values
+            vessel_ids = {}
+            anomaly_types = {}
+            sides = {}
+            
+            for ann in coco_data.get("annotations", []):
+                if "attributes" in ann:
+                    attrs = ann["attributes"]
+                    if "vessel_id" in attrs:
+                        vessel_id = attrs["vessel_id"]
+                        vessel_ids[vessel_id] = vessel_ids.get(vessel_id, 0) + 1
+                    
+                    if "anomaly_type" in attrs:
+                        anomaly_type = attrs["anomaly_type"]
+                        anomaly_types[anomaly_type] = anomaly_types.get(anomaly_type, 0) + 1
+                        
+                    if "side" in attrs:
+                        side = attrs["side"]
+                        sides[side] = sides.get(side, 0) + 1
+            
+            # Display top vessel_ids
+            if vessel_ids:
+                top_vessel_ids = sorted(vessel_ids.items(), key=lambda x: x[1], reverse=True)[:5]
+                print("Top vessel_id values:")
+                for vessel_id, count in top_vessel_ids:
+                    print(f"  - {vessel_id}: {count}")
+            
+            # Display anomaly_types
+            if anomaly_types:
+                print("Anomaly types:")
+                for anomaly_type, count in sorted(anomaly_types.items(), key=lambda x: x[1], reverse=True):
+                    print(f"  - {anomaly_type}: {count}")
+                    
+            # Display sides
+            if sides:
+                print("Sides:")
+                for side, count in sorted(sides.items(), key=lambda x: x[1], reverse=True):
+                    print(f"  - {side}: {count}")
     
     print("=== Categories ===")
     for cat in coco_data.get("categories", []):
@@ -141,9 +185,21 @@ def visualize_annotations(coco_data, image_dir, output_dir, max_images=5):
             # Draw bounding box
             cv2.rectangle(vis_img, (x, y), (x + w, y + h), color, 2)
             
-            # Add category label
+            # Add category label and attributes if present
             category_name = next((cat["name"] for cat in coco_data.get("categories", []) if cat["id"] == category_id), "Unknown")
-            cv2.putText(vis_img, category_name, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+            label = category_name
+            
+            # Add vessel_id and anomaly_type if present in attributes
+            if "attributes" in ann:
+                attrs = ann["attributes"]
+                if "vessel_id" in attrs and attrs["vessel_id"]:
+                    label += f" - {attrs['vessel_id']}"
+                if "anomaly_type" in attrs and attrs["anomaly_type"] and attrs["anomaly_type"] != "none":
+                    label += f" ({attrs['anomaly_type']})"
+                if "side" in attrs and attrs["side"] and attrs["side"] != "N/A":
+                    label += f" {attrs['side']}"
+                    
+            cv2.putText(vis_img, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
         
         # Save visualization
         output_path = output_dir / f"{image_path.stem}_vis.png"

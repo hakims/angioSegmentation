@@ -56,31 +56,94 @@ def find_media_files(root_dir):
     Returns:
         Dictionary mapping folders to lists of media files
     """
-    root_dir = Path(root_dir)
-    media_dict = {}
-    
-    # First, look for media files in nested directory structure
-    for root, _, files in os.walk(root_dir):
-        for file in files:
-            file_path = Path(root) / file
-            ext = file_path.suffix.lower()
-            if ext in IMAGE_EXTENSIONS or ext in VIDEO_EXTENSIONS:
-                fin_folder = Path(root)
-                if fin_folder not in media_dict:
-                    media_dict[fin_folder] = []
-                media_dict[fin_folder].append(file_path)
-    
-    # If no media found in nested structure, check if this is a flat directory with media files
-    if not media_dict:
-        direct_files = []
-        for ext in IMAGE_EXTENSIONS + VIDEO_EXTENSIONS:
-            direct_files.extend(list(root_dir.glob(f"*{ext}")))
+    try:
+        # Clean up the path - remove any quotes and normalize
+        root_dir = str(root_dir).strip('"').strip("'")
+        root_dir = Path(root_dir).resolve()
         
-        if direct_files:
-            print(f"Found {len(direct_files)} media files directly in {root_dir}")
-            media_dict[root_dir] = direct_files
-    
-    return media_dict
+        # Debug logging
+        print(f"\n🔍 Searching for media in: {root_dir}")
+        print(f"📁 Directory exists: {root_dir.exists()}")
+        print(f"📁 Is directory: {root_dir.is_dir()}")
+        
+        if not root_dir.exists():
+            print(f"❌ Error: Directory does not exist: {root_dir}")
+            return {}
+            
+        if not root_dir.is_dir():
+            print(f"❌ Error: Path is not a directory: {root_dir}")
+            return {}
+            
+        media_dict = {}
+        
+        # List all contents at root level
+        print("\n📂 Root directory contents:")
+        try:
+            for item in root_dir.iterdir():
+                print(f"  {'📁' if item.is_dir() else '📄'} {item.name}")
+        except Exception as e:
+            print(f"  ⚠️ Error listing directory contents: {str(e)}")
+        
+        # First, look for media files in nested directory structure
+        print("\n🔍 Searching nested directories...")
+        for root, dirs, files in os.walk(str(root_dir)):
+            current_path = Path(root)
+            print(f"\nChecking directory: {current_path}")
+            
+            media_files = []
+            for file in files:
+                try:
+                    file_path = current_path / file
+                    ext = file_path.suffix.lower()
+                    if ext in IMAGE_EXTENSIONS or ext in VIDEO_EXTENSIONS:
+                        print(f"  ✓ Found media file: {file}")
+                        media_files.append(file_path)
+                    else:
+                        print(f"  ✗ Skipping non-media file: {file} (ext: {ext})")
+                except Exception as e:
+                    print(f"  ⚠️ Error processing file {file}: {str(e)}")
+                    continue
+            
+            if media_files:
+                media_dict[current_path] = media_files
+                print(f"  ✅ Added {len(media_files)} files from {current_path}")
+        
+        # If no media found in nested structure, check flat directory
+        if not media_dict:
+            print("\n🔍 Checking for files in flat directory structure...")
+            direct_files = []
+            for ext in IMAGE_EXTENSIONS + VIDEO_EXTENSIONS:
+                try:
+                    found_files = list(root_dir.glob(f"*{ext}"))
+                    if found_files:
+                        print(f"  ✓ Found {len(found_files)} files with extension {ext}")
+                        direct_files.extend(found_files)
+                except Exception as e:
+                    print(f"  ⚠️ Error searching for {ext} files: {str(e)}")
+            
+            if direct_files:
+                media_dict[root_dir] = direct_files
+                print(f"  ✅ Added {len(direct_files)} files from flat directory")
+        
+        # Summary
+        if not media_dict:
+            print("\n❌ No media files found!")
+            print(f"Supported extensions: {IMAGE_EXTENSIONS + VIDEO_EXTENSIONS}")
+        else:
+            print("\n✅ Media files found:")
+            for folder, files in media_dict.items():
+                print(f"\nFolder: {folder}")
+                for f in files:
+                    print(f"  - {f.name}")
+        
+        return media_dict
+        
+    except Exception as e:
+        print(f"\n❌ Error while searching for media files:")
+        print(f"Error type: {type(e).__name__}")
+        print(f"Error message: {str(e)}")
+        print(f"Directory attempted: {root_dir}")
+        return {}
 
 def extract_frames_from_video(video_path, output_dir, use_fps=True, quiet=True):
     """
@@ -140,9 +203,22 @@ def get_frames_from_path(file_path, output_dir, use_fps=True, quiet=True, force_
         # Need to extract frames - first check for cropping
         crop_bounds = detect_crop_bounds_from_video(file_path)
         if crop_bounds:
-            cropped_path = file_path.with_name(file_path.stem + "_cropped.mp4")
-            if crop_video_with_ffmpeg(file_path, cropped_path, crop_bounds):
+            # Create cropped directory at the same level as frames directory
+            cropped_dir = output_dir.parent / "cropped"
+            cropped_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Save cropped video in the cropped directory
+            cropped_path = cropped_dir / f"{base_name}_cropped.mp4"
+            
+            # Check if cropped video already exists
+            if cropped_path.exists() and not force_extract:
+                print(f"  📋 Using existing cropped video: {cropped_path.name}")
                 file_path = cropped_path
+            elif crop_video_with_ffmpeg(file_path, cropped_path, crop_bounds):
+                print(f"  ✂️ Saved cropped video: {cropped_path.name}")
+                file_path = cropped_path
+            else:
+                print(f"  ⚠️ Cropping failed, using original video")
         
         # Extract frames
         return extract_frames_from_video(

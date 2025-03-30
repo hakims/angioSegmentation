@@ -1,14 +1,15 @@
 # File: preprocessing/bounding_boxes.py
-# Version: 0.09 (adds COCO format support)
+# Version: 0.21 (schema validation and attributes handling)
 # Purpose: Enhanced bounding box generation specifically tuned for vessel structures in angiogram images
 
-import cv2
-import numpy as np
 import json
+import numpy as np
+import cv2
 import os
 from pathlib import Path
 from .transforms import apply_transform
-from typing import Dict, List, Union, Optional
+from typing import Dict, List, Union, Optional, Any
+from utils.schema_utils import validate_and_fix_coco_annotations, get_default_attributes, validate_and_fix_attributes_dict
 
 def generate_boundingBoxes_from_vessel_map(vessel_prob_map: np.ndarray, min_size=2000, aspect_ratio_thresh=(0.05, 5.0), max_boundingBoxes=3) -> np.ndarray:
     """
@@ -68,85 +69,128 @@ def overlay_debug_outputs(image, vessel_map, boundingBoxes, save_path_prefix):
 
 def load_bounding_boxes(user_provided_path=None, media_folder=None):
     """
-    Load bounding boxes from user-provided file or search for metadata in media folder.
-    Supports both Dr-SAM native format and COCO format.
+    Load bounding boxes from a file or search for them in the media folder.
     
     Args:
-        user_provided_path: Optional path to user-provided JSON file
-        media_folder: Folder containing media files, to search for metadata
+        user_provided_path: Path to a JSON file with bounding boxes
+        media_folder: Folder to search for bounding boxes JSON files
         
     Returns:
-        Dictionary of bounding boxes, or empty dict if none found
+        Tuple containing:
+        - Dictionary mapping filenames to lists of bounding boxes
+        - Dictionary mapping filenames to attributes (or None if no attributes)
     """
     boundingBoxes_dict = {}
+    attributes_dict = {}
     
-    # 1. Try user-provided path first (highest priority)
+    # First try to load from user-provided file
     if user_provided_path:
         try:
             user_path = Path(user_provided_path)
-            if user_path.exists():
-                with open(user_path, 'r') as f:
-                    data = json.load(f)
-                
-                # Check if this is COCO format or Dr-SAM format
-                if "images" in data and "annotations" in data:
-                    # This is COCO format, convert to Dr-SAM format
-                    from utils.coco_utils import coco_to_drsam
-                    boundingBoxes_dict = coco_to_drsam(data)
-                    print(f"Loaded COCO format annotations from {user_path} and converted to Dr-SAM format")
-                else:
-                    # Assume Dr-SAM format
-                    boundingBoxes_dict = data
-                    print(f"Loaded {len(boundingBoxes_dict)} bounding boxes from user-provided file: {user_path}")
-                
-                return boundingBoxes_dict
-            else:
-                print(f"Warning: User-provided bounding box file not found: {user_path}")
-        except Exception as e:
-            print(f"Error loading user-provided bounding box file: {e}")
-    
-    # 2. Look for any JSON files in the media folder
-    if media_folder:
-        try:
-            media_path = Path(media_folder)
-            json_files = list(media_path.glob("*.json"))
             
+            # Check if it's in COCO format
+            if ".coco" in user_path.name.lower():
+                from utils.coco_utils import coco_to_drsam
+                
+                # Load and validate COCO data
+                with open(user_path, 'r') as f:
+                    coco_data = json.load(f)
+                
+                # Validate and fix attributes according to schema
+                fixed_coco, errors = validate_and_fix_coco_annotations(coco_data)
+                if errors:
+                    print(f"Schema validation fixed {len(errors)} issues:")
+                    for error in errors[:5]:  # Show first 5 errors
+                        print(f"  - {error}")
+                    if len(errors) > 5:
+                        print(f"  - ... and {len(errors) - 5} more issues")
+                
+                # Convert validated COCO to DrSAM format
+                boundingBoxes_dict, attributes_dict = coco_to_drsam(fixed_coco)
+                print(f"Loaded and validated COCO format from {user_path}")
+                return boundingBoxes_dict, attributes_dict
+            
+            # Otherwise assume it's in Dr-SAM format
+            with open(user_path, 'r') as f:
+                boundingBoxes_dict = json.load(f)
+                
+            # Check for companion attributes file
+            attr_path = user_path.with_suffix('.attributes.json')
+            if attr_path.exists():
+                with open(attr_path, 'r') as f:
+                    attributes_dict = json.load(f)
+                
+                # Validate and fix attributes according to schema
+                if attributes_dict:
+                    attributes_dict, validation_stats = validate_and_fix_attributes_dict(attributes_dict)
+                    if validation_stats["total_issues"] > 0:
+                        print(f"Schema validation fixed issues in {validation_stats['fixed_issues']} attribute sets")
+                    
+            print(f"Loaded {len(boundingBoxes_dict)} bounding boxes from {user_path}")
+            return boundingBoxes_dict, attributes_dict
+        except Exception as e:
+            print(f"⚠️ Error loading bounding boxes from {user_provided_path}: {e}")
+    
+    # If no user file or it failed, search in media folder
+    if media_folder and not boundingBoxes_dict:
+        try:
+            media_folder = Path(media_folder)
+            
+            # Look for boundingBoxes.json in the media folder
+            json_files = list(media_folder.glob("**/boundingBoxes.json"))
             if json_files:
-                # Try each JSON file to see if it contains bounding box data
-                for json_file in json_files:
-                    try:
-                        with open(json_file, 'r') as f:
-                            data = json.load(f)
+                # Use the first one found (prioritize root level if multiple)
+                for jf in sorted(json_files, key=lambda x: len(str(x))):
+                    with open(jf, 'r') as f:
+                        boundingBoxes_dict = json.load(f)
                         
-                        # Check if COCO format
-                        if isinstance(data, dict) and "images" in data and "annotations" in data:
-                            from utils.coco_utils import coco_to_drsam
-                            boundingBoxes_dict = coco_to_drsam(data)
-                            print(f"Found COCO format annotations in {json_file.name}")
-                            return boundingBoxes_dict
+                    # Check for companion attributes file
+                    attr_path = jf.with_suffix('.attributes.json')
+                    if attr_path.exists():
+                        with open(attr_path, 'r') as f:
+                            attributes_dict = json.load(f)
                             
-                        # Check if Dr-SAM format (dictionary mapping filenames to bounding boxes)
-                        elif isinstance(data, dict) and any(
-                            isinstance(v, list) and len(v) > 0 and 
-                            all(isinstance(coord, (int, float)) for item in v for coord in item)
-                            for v in data.values()
-                        ):
-                            boundingBoxes_dict = data
-                            print(f"Found Dr-SAM format bounding box metadata in {json_file.name} ({len(boundingBoxes_dict)} entries)")
-                            return boundingBoxes_dict
-                    except Exception as e:
-                        print(f"Error parsing {json_file.name}: {e}")
-                        continue
+                        # Validate and fix attributes according to schema
+                        if attributes_dict:
+                            attributes_dict, validation_stats = validate_and_fix_attributes_dict(attributes_dict)
+                            if validation_stats["total_issues"] > 0:
+                                print(f"Schema validation fixed issues in {validation_stats['fixed_issues']} attribute sets")
+                            
+                    print(f"Found existing bounding boxes in {jf}")
+                    return boundingBoxes_dict, attributes_dict
+                
+            # Look for annotations_coco.json (COCO format) in the media folder
+            coco_files = list(media_folder.glob("**/annotations_coco.json"))
+            if coco_files:
+                # Use the first one found (prioritize root level if multiple)
+                for cf in sorted(coco_files, key=lambda x: len(str(x))):
+                    with open(cf, 'r') as f:
+                        coco_data = json.load(f)
+                    
+                    # Validate and fix attributes according to schema
+                    fixed_coco, errors = validate_and_fix_coco_annotations(coco_data)
+                    if errors:
+                        print(f"Schema validation fixed {len(errors)} issues:")
+                        for error in errors[:5]:  # Show first 5 errors
+                            print(f"  - {error}")
+                        if len(errors) > 5:
+                            print(f"  - ... and {len(errors) - 5} more issues")
+                    
+                    from utils.coco_utils import coco_to_drsam
+                    boundingBoxes_dict, attributes_dict = coco_to_drsam(fixed_coco)
+                    print(f"Found and validated COCO annotations in {cf}")
+                    return boundingBoxes_dict, attributes_dict
                 
                 print(f"Searched {len(json_files)} JSON files in {media_folder}, but no valid bounding box data found")
         except Exception as e:
             print(f"Error searching for metadata in media folder: {e}")
     
-    return boundingBoxes_dict
+    return boundingBoxes_dict, attributes_dict
 
 
 def save_bounding_boxes(boundingBoxes: Dict[str, List[List[int]]], output_path: Union[str, Path], 
-                       format: str = "drsam", image_dir: Optional[Union[str, Path]] = None) -> None:
+                       format: str = "drsam", image_dir: Optional[Union[str, Path]] = None,
+                       attributes: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
     """
     Save bounding boxes to a file in the specified format.
     
@@ -155,6 +199,7 @@ def save_bounding_boxes(boundingBoxes: Dict[str, List[List[int]]], output_path: 
         output_path: Path to save the JSON file
         format: Format to save in ('drsam' or 'coco')
         image_dir: Directory containing the images (needed for COCO format)
+        attributes: Optional dictionary mapping filenames to annotation attributes
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -164,17 +209,25 @@ def save_bounding_boxes(boundingBoxes: Dict[str, List[List[int]]], output_path: 
             raise ValueError("image_dir is required for COCO format")
         
         from utils.coco_utils import drsam_to_coco
-        drsam_to_coco(boundingBoxes, image_dir, output_path)
+        drsam_to_coco(boundingBoxes, image_dir, output_path, attributes)
     else:
         # Save in Dr-SAM format
         with open(output_path, 'w') as f:
             json.dump(boundingBoxes, f, indent=2)
         
+        # If attributes are provided, save them to a separate file
+        if attributes:
+            attr_path = output_path.with_suffix('.attributes.json')
+            with open(attr_path, 'w') as f:
+                json.dump(attributes, f, indent=2)
+            print(f"Attributes saved to {attr_path}")
+            
         print(f"Dr-SAM bounding boxes saved to {output_path}")
 
 
 def process_images(image_files, output_folder=None, method="frangi", min_box_size=2000, 
-                  max_boundingBoxes=3, existing_boundingBoxes=None, auto_generate=True, save_debug=True):
+                  max_boundingBoxes=3, existing_boundingBoxes=None, auto_generate=True, 
+                  save_debug=True, existing_attributes=None):
     """
     Process a list of images to generate and/or visualize bounding boxes.
     
@@ -187,6 +240,7 @@ def process_images(image_files, output_folder=None, method="frangi", min_box_siz
         existing_boundingBoxes: Dictionary of existing bounding boxes (will be updated)
         auto_generate: Whether to auto-generate bounding boxes
         save_debug: Whether to save debug visualizations
+        existing_attributes: Dictionary of existing attributes for annotations
         
     Returns:
         Dictionary mapping filenames to bounding boxes
@@ -194,11 +248,17 @@ def process_images(image_files, output_folder=None, method="frangi", min_box_siz
     # Initialize boundingBoxes dictionary if not provided
     boundingBoxes_dict = existing_boundingBoxes.copy() if existing_boundingBoxes else {}
     
+    # Initialize attributes dictionary if provided
+    attributes_dict = existing_attributes.copy() if existing_attributes else {}
+    
     # Set up debug directory if needed
     debug_boundingBoxes_dir = None
     if output_folder and save_debug:
         debug_boundingBoxes_dir = Path(output_folder) / "debug" / "bounding_boxes"
         debug_boundingBoxes_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Track newly created attribute sets for validation
+    new_files_with_attributes = set()
     
     # Process each image
     for file in image_files:
@@ -225,6 +285,25 @@ def process_images(image_files, output_folder=None, method="frangi", min_box_siz
             )
             if len(boundingBoxes) > 0:
                 boundingBoxes_dict[file_name] = boundingBoxes.tolist()
+                
+                # Create default attributes for auto-generated boxes if not already present
+                if file_name not in attributes_dict:
+                    attributes_dict[file_name] = {}
+                
+                # Add default attributes for each new bounding box
+                for box_idx in range(len(boundingBoxes)):
+                    if box_idx not in attributes_dict.get(file_name, {}):
+                        # Get default attributes from schema
+                        default_attrs = get_default_attributes("vessel")
+                        
+                        # Override with auto-generation specific values
+                        default_attrs.update({
+                            "vessel_id": "SFA",  # Default to SFA as most common
+                            "annotator": "DrSAM",  # Mark as auto-generated
+                        })
+                        
+                        attributes_dict.setdefault(file_name, {})[box_idx] = default_attrs
+                        new_files_with_attributes.add(file_name)
         
         # Create debug visualization if requested
         if debug_boundingBoxes_dir and file_name in boundingBoxes_dict:
@@ -236,13 +315,30 @@ def process_images(image_files, output_folder=None, method="frangi", min_box_siz
                 boundingBoxes_np = np.array(boundingBox_data)
                 overlay_debug_outputs(image, vessel_map, boundingBoxes_np, str(debug_prefix))
     
+    # Validate auto-generated attributes against schema
+    if new_files_with_attributes:
+        print(f"Validating {len(new_files_with_attributes)} auto-generated attribute sets...")
+        
+        # Create a subset dictionary with just the new files
+        new_attributes_dict = {filename: attributes_dict[filename] for filename in new_files_with_attributes}
+        
+        # Validate and fix according to schema
+        validated_attributes, validation_stats = validate_and_fix_attributes_dict(new_attributes_dict)
+        
+        # Update the main attributes dictionary with validated values
+        for filename, attrs in validated_attributes.items():
+            attributes_dict[filename] = attrs
+            
+        if validation_stats["total_issues"] > 0:
+            print(f"Fixed {validation_stats['fixed_issues']} auto-generated attribute sets to comply with schema")
+    
     # Save boundingBoxes to JSON files if output folder is provided
     if output_folder:
         output_folder_path = Path(output_folder)
         
         # Save in Dr-SAM format
         drsam_path = output_folder_path / "boundingBoxes.json"
-        save_bounding_boxes(boundingBoxes_dict, drsam_path, format="drsam")
+        save_bounding_boxes(boundingBoxes_dict, drsam_path, format="drsam", attributes=attributes_dict)
         
         # Also save in COCO format
         coco_path = output_folder_path / "annotations_coco.json"
@@ -251,9 +347,10 @@ def process_images(image_files, output_folder=None, method="frangi", min_box_siz
                 boundingBoxes_dict, 
                 coco_path, 
                 format="coco", 
-                image_dir=output_folder_path / "frames"
+                image_dir=output_folder_path / "frames",
+                attributes=attributes_dict
             )
         except Exception as e:
             print(f"Error saving COCO format: {e}")
     
-    return boundingBoxes_dict
+    return boundingBoxes_dict, attributes_dict

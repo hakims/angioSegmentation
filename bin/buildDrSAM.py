@@ -9,7 +9,7 @@ Run this script after installing dependencies with:
     python buildDrSAM.py <root_folder>
 
 For testing, use the dedicated testing framework:
-    python tests/testingMaster.py
+    python tests/run_tests.py
 """
 
 import sys
@@ -52,7 +52,8 @@ _run_build_dependencies_if_needed()
 
 def main(input_path, use_fps=False, method="median", quiet=True, auto_boundingBox=True, 
          boundingBox_method="frangi", min_boundingBox_size=2000, user_provided_boundingBoxes=None, 
-         boundingBox_file=None, output_dir=None, force_extract=False, output_format="both"):
+         user_provided_attributes=None, boundingBox_file=None, output_dir=None, 
+         force_extract=False, output_format="both", validate_schema=True):
     """
     Main DrSAM pipeline function.
     
@@ -65,21 +66,43 @@ def main(input_path, use_fps=False, method="median", quiet=True, auto_boundingBo
         boundingBox_method: Method for automatic bounding box generation
         min_boundingBox_size: Minimum size for keeping auto-generated bounding boxes
         user_provided_boundingBoxes: Optional dictionary mapping filenames to pre-defined bounding boxes 
+        user_provided_attributes: Optional dictionary mapping filenames to annotation attributes
         boundingBox_file: Path to JSON file containing bounding box information
         output_dir: Custom output directory
         force_extract: Whether to force re-extraction of frames from videos
         output_format: Format for output annotations ('drsam', 'coco', or 'both')
+        validate_schema: Whether to validate metadata against the CVAT labeling schema
     """
-    print(f"📂 Processing: {input_path}")
+    print(f"�� Processing: {input_path}")
     input_path = Path(input_path)
     total_start = time.time()
     
     # Initialize boundingBoxes dictionary from user_provided_boundingBoxes if provided
     boundingBoxes_dict = user_provided_boundingBoxes.copy() if user_provided_boundingBoxes else {}
     
+    # Initialize attributes dictionary from user_provided_attributes if provided
+    attributes_dict = user_provided_attributes.copy() if user_provided_attributes else {}
+    
     # If no pre-loaded boundingBoxes, try to load from file or search in input folder
     if not boundingBoxes_dict:
-        boundingBoxes_dict = load_bounding_boxes(boundingBox_file, input_path)
+        boundingBoxes_dict, attr_dict = load_bounding_boxes(boundingBox_file, input_path)
+        if attr_dict:
+            attributes_dict.update(attr_dict)
+    
+    # Validate all attributes against schema if requested
+    if validate_schema and attributes_dict:
+        from utils.schema_utils import validate_and_fix_attributes_dict
+        
+        print(f"Validating {sum(len(attrs) for attrs in attributes_dict.values())} attribute sets against schema...")
+        
+        # Validate and fix attributes according to schema
+        attributes_dict, validation_stats = validate_and_fix_attributes_dict(attributes_dict)
+        
+        # Report validation results
+        if validation_stats["total_issues"] > 0:
+            print(f"Schema validation fixed issues in {validation_stats['fixed_issues']} attribute sets")
+        else:
+            print("All attributes are schema-compliant!")
     
     # Determine if we should auto-generate bounding boxes
     should_auto_generate = auto_boundingBox and not boundingBoxes_dict
@@ -141,12 +164,13 @@ def main(input_path, use_fps=False, method="median", quiet=True, auto_boundingBo
         # Generate bounding boxes and segment all frames
         if all_frames:
             # Process images to generate bounding boxes or use existing ones
-            boundingBoxes_dict = process_images(
+            boundingBoxes_dict, attributes_dict = process_images(
                 image_files=all_frames,
                 output_folder=target_output,
                 method=boundingBox_method,
                 min_box_size=min_boundingBox_size,
                 existing_boundingBoxes=boundingBoxes_dict,
+                existing_attributes=attributes_dict,
                 auto_generate=should_auto_generate,
                 save_debug=True
             )
@@ -168,7 +192,8 @@ def main(input_path, use_fps=False, method="median", quiet=True, auto_boundingBo
                 frames=all_frames,
                 output_root=target_output,
                 method=method,
-                frame_to_boundingBoxes=boundingBoxes_dict
+                frame_to_boundingBoxes=boundingBoxes_dict,
+                frame_to_attributes=attributes_dict
             )
     
     total_time = time.time() - total_start
@@ -209,52 +234,14 @@ def parse_arguments():
     parser.add_argument("--output-format", type=str, default="both", choices=["drsam", "coco", "both"],
                        help="Format for output annotations")
     
-    # COCO format conversion utilities
-    coco_group = parser.add_argument_group("COCO Format Utilities")
-    coco_group.add_argument("--convert-to-coco", type=str, default=None, metavar="DRSAM_JSON",
-                          help="Convert Dr-SAM format JSON to COCO format without running segmentation")
-    coco_group.add_argument("--convert-to-drsam", type=str, default=None, metavar="COCO_JSON",
-                          help="Convert COCO format JSON to Dr-SAM format without running segmentation")
-    coco_group.add_argument("--image-dir", type=str, default=None,
-                          help="Image directory for COCO conversion (required for --convert-to-coco)")
-    coco_group.add_argument("--output-json", type=str, default=None,
-                          help="Output path for conversion (default: input_path with new extension)")
+    # Testing arguments
+    parser.add_argument("--validate-schema", action="store_true",
+                       help="Validate metadata against the CVAT labeling schema")
     
     # Set defaults
     parser.set_defaults(auto_boundingBox=True)
     
     args = parser.parse_args()
-    
-    # Handle COCO conversion utilities
-    if args.convert_to_coco or args.convert_to_drsam:
-        if args.convert_to_coco and not args.image_dir:
-            parser.error("--image-dir is required when using --convert-to-coco")
-        
-        # Import COCO utilities
-        from utils.coco_utils import drsam_to_coco, coco_to_drsam
-        
-        if args.convert_to_coco:
-            # Convert Dr-SAM to COCO
-            input_path = Path(args.convert_to_coco)
-            output_path = Path(args.output_json) if args.output_json else input_path.with_suffix('.coco.json')
-            
-            print(f"Converting Dr-SAM format '{input_path}' to COCO format '{output_path}'")
-            with open(input_path, 'r') as f:
-                drsam_data = json.load(f)
-            
-            drsam_to_coco(drsam_data, args.image_dir, output_path)
-            print("Conversion complete.")
-            sys.exit(0)
-        
-        elif args.convert_to_drsam:
-            # Convert COCO to Dr-SAM
-            input_path = Path(args.convert_to_drsam)
-            output_path = Path(args.output_json) if args.output_json else input_path.with_suffix('.drsam.json')
-            
-            print(f"Converting COCO format '{input_path}' to Dr-SAM format '{output_path}'")
-            coco_to_drsam(input_path, output_path)
-            print("Conversion complete.")
-            sys.exit(0)
     
     # If no input is provided, show help and exit
     if args.input is None:
@@ -276,8 +263,10 @@ if __name__ == "__main__":
         boundingBox_method=args.boundingBox_method,
         min_boundingBox_size=args.min_boundingBox_size,
         user_provided_boundingBoxes=None,  # No pre-loaded boxes in normal mode
+        user_provided_attributes=None,
         boundingBox_file=args.user_provided_boundingBoxes,
         output_dir=args.output_dir,
         force_extract=args.force_extract,
-        output_format=args.output_format
+        output_format=args.output_format,
+        validate_schema=args.validate_schema
     )
